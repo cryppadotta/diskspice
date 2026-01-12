@@ -1,92 +1,141 @@
-# Clarify Implementation Tickets
+# Implementation Tickets
 
-This folder contains Ralph Wiggum-compatible tickets for implementing the Clarify app.
+This folder contains Ralph Wiggum-compatible tickets for implementing a project.
 
-## Structure
+## Folder Structure
 
 ```
-tickets/
-  todo/       # Tickets ready to be worked on
-  complete/   # Completed tickets (move here when done)
+plans/
+  SPEC.md                    # Product specification
+  RALPH_INSTRUCTIONS.md      # Instructions for the executing agent
+  README.md                  # This file (ticket format guide)
+  tickets/
+    todo/                    # Tickets ready to be worked on
+    complete/                # Completed tickets (moved here when done)
 ```
 
-## Using with Ralph Wiggum
+## Ticket Format
 
-### Start a ticket
+Each ticket is a markdown file with a numbered prefix: `XXX-short-name.md`
+
+### Required Sections
+
+```markdown
+# XXX: Ticket Title
+
+## Dependencies
+- NNN (ticket must be complete before this one can start)
+- None (if no dependencies)
+
+## Task
+Brief description of what needs to be built or accomplished.
+
+## Spec Reference
+Link to relevant section in SPEC.md for full context.
+
+## Implementation Details
+Detailed instructions, code snippets, file paths, commands, etc.
+Be specific enough that the agent can execute without guessing.
+
+## Files to Create/Modify
+- `path/to/new/file.swift` - Description
+- `path/to/existing/file.swift` - What changes
+
+## Acceptance Criteria
+- [ ] Criterion 1 - specific, testable condition
+- [ ] Criterion 2 - another condition
+- [ ] Criterion 3 - etc.
+
+## Completion Promise
+\`<promise>TICKET_XXX_COMPLETE</promise>\`
+```
+
+### Writing Good Tickets
+
+1. **Be specific**: Include exact file paths, function names, code snippets
+2. **Make criteria testable**: "App compiles without errors" not "App works"
+3. **Keep scope small**: One logical unit of work per ticket
+4. **Include context**: Reference SPEC.md sections, explain the "why"
+5. **Order dependencies correctly**: Lower-numbered tickets should be dependencies of higher ones
+
+### Example Ticket
+
+```markdown
+# 003: Create Data Model for Folder Tree
+
+## Dependencies
+- 001 (project setup)
+- 002 (Swift package structure)
+
+## Task
+Create the core data model representing the folder tree structure with size information.
+
+## Spec Reference
+See SPEC.md > Scanning Engine and Caching & Persistence sections.
+
+## Implementation Details
+Create a FolderNode model that represents a node in the file system tree:
+
+\`\`\`swift
+struct FolderNode: Identifiable, Hashable {
+    let id: UUID
+    let path: URL
+    let name: String
+    var size: Int64
+    var children: [FolderNode]
+    var isScanning: Bool
+    var lastScanned: Date?
+}
+\`\`\`
+
+## Files to Create/Modify
+- `DiskSpice/Models/FolderNode.swift` - New file
+
+## Acceptance Criteria
+- [ ] FolderNode struct compiles
+- [ ] Conforms to Identifiable and Hashable
+- [ ] Can represent nested folder structure
+- [ ] Includes scanning state tracking
+
+## Completion Promise
+\`<promise>TICKET_003_COMPLETE</promise>\`
+```
+
+## Running Ralph
+
+### Start the execution loop
 
 ```bash
-# Start Ralph loop with a specific ticket
-claude --print "$(cat plans/tickets/todo/001-supabase-project-setup.md)" | /ralph-wiggum:ralph-loop
+# Point Ralph at the instructions
+cat plans/RALPH_INSTRUCTIONS.md | claude
 ```
 
-### Workflow
+### Manual workflow
 
-1. Pick the lowest-numbered ticket with all dependencies complete
-2. Run Ralph with that ticket
-3. When Ralph outputs the completion promise, move ticket to `complete/`
-4. Repeat
+1. Pick the lowest-numbered ticket with all dependencies in `complete/`
+2. Execute the ticket
+3. Verify all acceptance criteria pass
+4. Move ticket: `mv plans/tickets/todo/XXX-*.md plans/tickets/complete/`
+5. Commit: `git add -A && git commit -m "Complete ticket XXX: [title]"`
+6. Repeat
 
-### Ticket Format
+## Dependency Graph Tips
 
-Each ticket contains:
+- Tickets 001-00N with no dependencies can run in parallel
+- Database/model tickets should come before UI tickets
+- Scaffold/setup tickets should be early (001-005 range)
+- Polish/optimization tickets should be late (high numbers)
 
-- **Dependencies**: Other tickets that must be complete first
-- **Task**: What to build
-- **PRD Reference**: Link to full PRD for context
-- **Implementation Details**: Code snippets (SQL, TypeScript)
-- **Files to Create/Modify**: Expected file paths
-- **Acceptance Criteria**: Checkboxes for verification
-- **Completion Promise**: Signal for Ralph to emit when done
+## Status Commands
 
-### Dependency Rules
+```bash
+# Count remaining vs complete
+echo "TODO: $(ls plans/tickets/todo/*.md 2>/dev/null | wc -l)"
+echo "DONE: $(ls plans/tickets/complete/*.md 2>/dev/null | wc -l)"
 
-- Tickets 001, 008, 037 have no dependencies (can start in parallel)
-- Database tickets (002-007) depend on 001
-- Most app tickets depend on 008 (Expo scaffold)
-- Check each ticket's Dependencies section before starting
+# List tickets in dependency order
+ls -1 plans/tickets/todo/*.md | sort -t- -k1 -n
 
-### Completion Verification
-
-When Ralph emits `<promise>TICKET_XXX_COMPLETE</promise>`:
-
-1. Verify all acceptance criteria are checked
-2. Run any tests mentioned in the ticket
-3. Move file from `todo/` to `complete/`
-4. Commit changes
-
-## PRD Reference
-
-Full product requirements: `plans/clarify-prd.md`
-
-## Bootstrapping Notes
-
-**Supabase is already configured!** The `.env` file contains all credentials:
-
+# Find tickets with no dependencies
+grep -l "^- None" plans/tickets/todo/*.md
 ```
-SUPABASE_PROJECT_URL=https://jnnhttmrjvgrpsoerzvi.supabase.co
-NEXT_PUBLIC_SUPABASE_URL=...
-EXPO_PUBLIC_SUPABASE_URL=...
-DATABASE_URL=...
-```
-
-### Starter Templates
-
-- **Next.js (web)**: Use Vercel's Supabase starter - `npx create-next-app -e with-supabase clarify-web`
-- **Expo (mobile)**: Use tabs template - `npx create-expo-app clarify-app --template tabs`
-
-Ticket 001 verifies Supabase config, ticket 008 creates Expo app, ticket 037 creates Next.js app.
-
-## Phase Overview
-
-| Phase | Tickets | Focus |
-|-------|---------|-------|
-| 1 | 001-008 | Foundation (Supabase, DB, Expo) |
-| 2 | 009-012 | Auth & Onboarding |
-| 3 | 013-019 | Question Types |
-| 4 | 020-023 | Quiz Taking |
-| 5 | 024-028 | AI Integration |
-| 6 | 029-031 | Insights & Profile |
-| 7 | 032-036 | Social Features |
-| 8 | 037-041 | Sharing & Deep Links |
-| 9 | 042-044 | Notifications |
-| 10 | 045-050 | Monetization & Polish |
