@@ -12,6 +12,8 @@ struct TreemapView: View {
     @State private var rects: [TreemapRect] = []
     @State private var viewSize: CGSize = .zero
     @State private var hoverLocation: CGPoint? = nil
+    @State private var layoutTask: Task<Void, Never>?
+    @State private var lastLayoutSignature: Int? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -37,12 +39,10 @@ struct TreemapView: View {
             }
             .onChange(of: geometry.size) { _, newSize in
                 viewSize = newSize
-                recalculateLayout(size: newSize)
+                scheduleLayoutRecalculation(animated: false)
             }
             .onChange(of: nodes) { _, _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    recalculateLayout(size: viewSize)
-                }
+                scheduleLayoutRecalculation(animated: true)
             }
             .onContinuousHover { phase in
                 switch phase {
@@ -295,8 +295,42 @@ struct TreemapView: View {
 
     private func recalculateLayout(size: CGSize) {
         guard size.width > 0 && size.height > 0 else { return }
+        let signature = layoutSignature(for: nodes, size: size)
+        guard signature != lastLayoutSignature else { return }
+        lastLayoutSignature = signature
         let bounds = CGRect(origin: .zero, size: size)
         rects = TreemapLayout.layout(nodes: nodes, in: bounds)
+    }
+
+    private func scheduleLayoutRecalculation(animated: Bool) {
+        layoutTask?.cancel()
+        let size = viewSize
+        layoutTask = Task {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if animated {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        recalculateLayout(size: size)
+                    }
+                } else {
+                    recalculateLayout(size: size)
+                }
+            }
+        }
+    }
+
+    private func layoutSignature(for nodes: [FileNode], size: CGSize) -> Int {
+        var hasher = Hasher()
+        hasher.combine(Int(size.width))
+        hasher.combine(Int(size.height))
+        hasher.combine(nodes.count)
+        for node in nodes {
+            hasher.combine(node.path)
+            hasher.combine(node.size)
+            hasher.combine(node.itemCount)
+        }
+        return hasher.finalize()
     }
 
     // MARK: - Interaction

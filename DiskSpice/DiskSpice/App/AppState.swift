@@ -63,6 +63,7 @@ class AppState {
 
     // File tree cache - maps path to children
     private var fileTree: [URL: [FileNode]] = [:]
+    private var sortedCache: (key: SortedNodesKey, nodes: [FileNode])?
 
     init() {
         // Default to root
@@ -178,10 +179,22 @@ class AppState {
             // Default order: size/itemCount descending, name/date ascending
             sortOrder = (field == .size || field == .itemCount) ? .descending : .ascending
         }
+        sortedCache = nil
     }
 
-    func sortedNodes(_ nodes: [FileNode]) -> [FileNode] {
-        nodes.sorted { a, b in
+    func sortedNodes(for path: URL, nodes: [FileNode]) -> [FileNode] {
+        let key = SortedNodesKey(
+            path: path,
+            sortField: sortField,
+            sortOrder: sortOrder,
+            signature: nodesSignature(nodes)
+        )
+
+        if let cached = sortedCache, cached.key == key {
+            return cached.nodes
+        }
+
+        let sorted = nodes.sorted { a, b in
             let comparison: Bool
             switch sortField {
             case .size:
@@ -197,6 +210,9 @@ class AppState {
             }
             return sortOrder == .ascending ? comparison : !comparison
         }
+
+        sortedCache = (key: key, nodes: sorted)
+        return sorted
     }
 
     // MARK: - File Operations
@@ -231,6 +247,9 @@ class AppState {
 
     func updateChildren(at path: URL, children: [FileNode]) {
         fileTree[path] = children
+        if path == navigationState.currentPath {
+            sortedCache = nil
+        }
     }
 
     func getChildren(at path: URL) -> [FileNode] {
@@ -239,5 +258,26 @@ class AppState {
 
     func clearTree() {
         fileTree.removeAll()
+        sortedCache = nil
     }
+}
+
+private struct SortedNodesKey: Equatable {
+    let path: URL
+    let sortField: SortField
+    let sortOrder: SortOrder
+    let signature: Int
+}
+
+private func nodesSignature(_ nodes: [FileNode]) -> Int {
+    var hasher = Hasher()
+    hasher.combine(nodes.count)
+    for node in nodes {
+        hasher.combine(node.path)
+        hasher.combine(node.name)
+        hasher.combine(node.size)
+        hasher.combine(node.itemCount)
+        hasher.combine(node.modifiedDate?.timeIntervalSince1970 ?? 0)
+    }
+    return hasher.finalize()
 }

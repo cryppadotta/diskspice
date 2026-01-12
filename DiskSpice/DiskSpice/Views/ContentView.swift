@@ -103,7 +103,10 @@ struct ContentView: View {
 
     private func selectNextItem() {
         debugLog("selectNextItem called", category: "KEY")
-        let nodes = appState.currentChildren.sorted { $0.size > $1.size }
+        let nodes = appState.sortedNodes(
+            for: appState.navigationState.currentPath,
+            nodes: appState.currentChildren
+        )
         guard !nodes.isEmpty else {
             debugLog("selectNextItem: no nodes", category: "KEY")
             return
@@ -119,7 +122,10 @@ struct ContentView: View {
     }
 
     private func selectPreviousItem() {
-        let nodes = appState.currentChildren.sorted { $0.size > $1.size }
+        let nodes = appState.sortedNodes(
+            for: appState.navigationState.currentPath,
+            nodes: appState.currentChildren
+        )
         guard !nodes.isEmpty else { return }
 
         if let currentId = appState.selectedNode?.id,

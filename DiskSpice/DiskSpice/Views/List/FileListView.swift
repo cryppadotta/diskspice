@@ -10,7 +10,7 @@ struct FileListView: View {
     }
 
     private var sortedNodes: [FileNode] {
-        appState.sortedNodes(nodes)
+        appState.sortedNodes(for: appState.navigationState.currentPath, nodes: nodes)
     }
 
     var body: some View {
