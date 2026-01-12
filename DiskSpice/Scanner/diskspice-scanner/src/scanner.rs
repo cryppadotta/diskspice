@@ -48,6 +48,8 @@ pub struct Scanner {
     paused: Arc<AtomicBool>,
     cancelled: Arc<AtomicBool>,
     control_rx: Option<Receiver<ControlCommand>>,
+    pending_entries: usize,
+    flush_batch_size: usize,
 }
 
 impl Scanner {
@@ -57,6 +59,8 @@ impl Scanner {
             paused: Arc::new(AtomicBool::new(false)),
             cancelled: Arc::new(AtomicBool::new(false)),
             control_rx: None,
+            pending_entries: 0,
+            flush_batch_size: 256,
         }
     }
 
@@ -67,6 +71,8 @@ impl Scanner {
             paused: Arc::new(AtomicBool::new(false)),
             cancelled: Arc::new(AtomicBool::new(false)),
             control_rx: Some(rx),
+            pending_entries: 0,
+            flush_batch_size: 256,
         };
         (scanner, tx)
     }
@@ -161,8 +167,8 @@ impl Scanner {
             return (0, 0);
         }
 
-        let entries: Vec<_> = match fs::read_dir(path) {
-            Ok(entries) => entries.filter_map(|e| e.ok()).collect(),
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
             Err(e) => {
                 self.emit_error(&path.display().to_string(), &e.to_string());
                 return (0, 0);
@@ -170,6 +176,13 @@ impl Scanner {
         };
 
         for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    self.emit_error(&path.display().to_string(), &e.to_string());
+                    continue;
+                }
+            };
             // Check for control commands during iteration
             if !self.check_control() {
                 return (total_size, total_items);
@@ -215,7 +228,7 @@ impl Scanner {
                 file_type,
             };
 
-            self.emit(ScanMessage::Entry(file_entry));
+            self.emit_entry(file_entry);
 
             total_size += size;
             total_items += item_count;
@@ -251,9 +264,26 @@ impl Scanner {
     }
 
     fn emit(&mut self, message: ScanMessage) {
+        self.write_message(message, true);
+    }
+
+    fn emit_entry(&mut self, entry: FileEntry) {
+        self.write_message(ScanMessage::Entry(entry), false);
+    }
+
+    fn write_message(&mut self, message: ScanMessage, force_flush: bool) {
         if let Ok(json) = serde_json::to_string(&message) {
             writeln!(self.writer, "{}", json).ok();
-            self.writer.flush().ok();
+            if force_flush {
+                self.pending_entries = 0;
+                self.writer.flush().ok();
+            } else {
+                self.pending_entries += 1;
+                if self.pending_entries >= self.flush_batch_size {
+                    self.pending_entries = 0;
+                    self.writer.flush().ok();
+                }
+            }
         }
     }
 
