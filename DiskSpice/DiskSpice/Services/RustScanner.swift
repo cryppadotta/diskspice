@@ -8,6 +8,9 @@ class RustScanner: Scanner {
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
+    private var pendingEntries: [ScanEntry] = []
+    private var flushTask: Task<Void, Never>?
+    private let flushInterval: Duration = .milliseconds(80)
 
     private var scannerPath: URL? {
         Bundle.main.url(forResource: "diskspice-scan", withExtension: nil, subdirectory: "Resources")
@@ -22,6 +25,9 @@ class RustScanner: Scanner {
         }
 
         isScanning = true
+        pendingEntries.removeAll()
+        flushTask?.cancel()
+        flushTask = nil
 
         let process = Process()
         process.executableURL = scannerURL
@@ -57,6 +63,7 @@ class RustScanner: Scanner {
             delegate?.scanner(self, didFailAt: path, error: error)
         }
 
+        flushPendingEntries()
         isScanning = false
         delegate?.scannerDidComplete(self)
     }
@@ -104,14 +111,14 @@ class RustScanner: Scanner {
     private func handleMessage(_ message: RustScanMessage, basePath: URL) {
         switch message {
         case .entry(let entry):
-            let node = FileNode(from: entry)
-            let parentPath = URL(fileURLWithPath: entry.path).deletingLastPathComponent()
-            delegate?.scanner(self, didUpdateNode: node, at: parentPath)
+            bufferEntry(entry)
 
         case .folderComplete(let path, _):
+            flushPendingEntries()
             delegate?.scanner(self, didCompleteFolder: URL(fileURLWithPath: path))
 
         case .error(let path, let message):
+            flushPendingEntries()
             let error = ScanError.scanFailed(message)
             delegate?.scanner(self, didFailAt: URL(fileURLWithPath: path), error: error)
 
@@ -120,6 +127,7 @@ class RustScanner: Scanner {
             break
 
         case .done(_, _):
+            flushPendingEntries()
             // Final completion handled in startScan
             break
         }
@@ -147,6 +155,33 @@ class RustScanner: Scanner {
         guard let pipe = stdinPipe else { return }
         if let data = (command + "\n").data(using: .utf8) {
             pipe.fileHandleForWriting.write(data)
+        }
+    }
+
+    private func bufferEntry(_ entry: ScanEntry) {
+        pendingEntries.append(entry)
+        if flushTask == nil {
+            flushTask = Task { [weak self] in
+                try? await Task.sleep(for: self?.flushInterval ?? .milliseconds(80))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.flushPendingEntries()
+                }
+            }
+        }
+    }
+
+    private func flushPendingEntries() {
+        guard !pendingEntries.isEmpty else { return }
+        let entries = pendingEntries
+        pendingEntries.removeAll()
+        flushTask?.cancel()
+        flushTask = nil
+
+        for entry in entries {
+            let node = FileNode(from: entry)
+            let parentPath = URL(fileURLWithPath: entry.path).deletingLastPathComponent()
+            delegate?.scanner(self, didUpdateNode: node, at: parentPath)
         }
     }
 }
