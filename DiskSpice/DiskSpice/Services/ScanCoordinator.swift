@@ -5,7 +5,7 @@ class ScanCoordinator: ScannerDelegate {
     let scanner: any Scanner
     let appState: AppState
 
-    private var pendingUpdates: [URL: [FileNode]] = [:]
+    private var pendingUpdates: [URL: PendingUpdates] = [:]
     private var updateDebounceTask: Task<Void, Never>?
 
     init(scanner: any Scanner, appState: AppState) {
@@ -63,15 +63,9 @@ class ScanCoordinator: ScannerDelegate {
 
     private func handleNodeUpdate(_ node: FileNode, at parentPath: URL) {
         // Accumulate updates for batching
-        var children = pendingUpdates[parentPath] ?? []
-
-        // Update or add the node
-        if let index = children.firstIndex(where: { $0.path == node.path }) {
-            children[index] = node
-        } else {
-            children.append(node)
-        }
-        pendingUpdates[parentPath] = children
+        var bucket = pendingUpdates[parentPath] ?? PendingUpdates()
+        bucket.add(node)
+        pendingUpdates[parentPath] = bucket
 
         // Debounce updates for performance
         scheduleFlush()
@@ -87,16 +81,27 @@ class ScanCoordinator: ScannerDelegate {
     }
 
     private func flushPendingUpdates() {
-        for (path, newNodes) in pendingUpdates {
-            // Merge with existing children
+        for (path, bucket) in pendingUpdates {
+            let newNodes = bucket.orderedNodes
             var existingChildren = appState.getChildren(at: path)
+            var indexByPath: [URL: Int] = [:]
 
+            for (index, child) in existingChildren.enumerated() {
+                indexByPath[child.path] = index
+            }
+
+            var appended: [FileNode] = []
             for node in newNodes {
-                if let index = existingChildren.firstIndex(where: { $0.path == node.path }) {
+                if let index = indexByPath[node.path] {
                     existingChildren[index] = node
                 } else {
-                    existingChildren.append(node)
+                    appended.append(node)
+                    indexByPath[node.path] = existingChildren.count + appended.count - 1
                 }
+            }
+
+            if !appended.isEmpty {
+                existingChildren.append(contentsOf: appended)
             }
 
             appState.updateChildren(at: path, children: existingChildren)
@@ -131,5 +136,21 @@ class ScanCoordinator: ScannerDelegate {
     private func handleScanComplete() {
         flushPendingUpdates()
         appState.isScanning = false
+    }
+}
+
+private struct PendingUpdates {
+    private var nodesByPath: [URL: FileNode] = [:]
+    private var order: [URL] = []
+
+    mutating func add(_ node: FileNode) {
+        if nodesByPath[node.path] == nil {
+            order.append(node.path)
+        }
+        nodesByPath[node.path] = node
+    }
+
+    var orderedNodes: [FileNode] {
+        order.compactMap { nodesByPath[$0] }
     }
 }
