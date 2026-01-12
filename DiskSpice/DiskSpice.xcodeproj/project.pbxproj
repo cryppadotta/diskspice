@@ -10,6 +10,31 @@
 		0000000100000001 /* DiskSpiceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000002 /* DiskSpiceApp.swift */; };
 		0000000100000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000004 /* ContentView.swift */; };
 		0000000100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0000000200000006 /* Assets.xcassets */; };
+		0000000100000007 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000012 /* AppState.swift */; };
+		0000000100000009 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000014 /* FileNode.swift */; };
+		000000010000000B /* VolumeInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000016 /* VolumeInfo.swift */; };
+		000000010000000D /* NavigationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000018 /* NavigationState.swift */; };
+		000000010000000F /* ScannerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000001A /* ScannerProtocol.swift */; };
+		0000000100000011 /* MockScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000001C /* MockScanner.swift */; };
+		0000000100000013 /* RustScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000001E /* RustScanner.swift */; };
+		0000000100000015 /* DiskSummaryBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000020 /* DiskSummaryBar.swift */; };
+		0000000100000017 /* SplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000022 /* SplitView.swift */; };
+		0000000100000019 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000024 /* BreadcrumbBar.swift */; };
+		000000010000001B /* FileListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000026 /* FileListView.swift */; };
+		000000010000001D /* TreemapLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000028 /* TreemapLayout.swift */; };
+		000000010000001F /* TreemapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000002A /* TreemapView.swift */; };
+		0000000100000021 /* FileTypeColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000002C /* FileTypeColors.swift */; };
+		0000000100000023 /* TreemapContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000002E /* TreemapContainer.swift */; };
+		0000000100000025 /* ScanStatusModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000030 /* ScanStatusModifier.swift */; };
+		0000000100000027 /* ScanCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000032 /* ScanCoordinator.swift */; };
+		0000000100000029 /* VolumeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000034 /* VolumeManager.swift */; };
+		000000010000002B /* CacheSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000036 /* CacheSchema.swift */; };
+		000000010000002D /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000038 /* CacheManager.swift */; };
+		000000010000002F /* SearchBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000003A /* SearchBar.swift */; };
+		0000000100000031 /* FileOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000003C /* FileOperations.swift */; };
+		0000000100000033 /* DebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000020000003E /* DebugLogger.swift */; };
+		0000000100000035 /* SwiftScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000200000040 /* SwiftScanner.swift */; };
+		000000A000000006 /* ScanQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000A000000005 /* ScanQueue.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,6 +43,31 @@
 		0000000200000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0000000200000008 /* DiskSpice.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DiskSpice.entitlements; sourceTree = "<group>"; };
 		0000000200000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0000000200000012 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		0000000200000014 /* FileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileNode.swift; sourceTree = "<group>"; };
+		0000000200000016 /* VolumeInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeInfo.swift; sourceTree = "<group>"; };
+		0000000200000018 /* NavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationState.swift; sourceTree = "<group>"; };
+		000000020000001A /* ScannerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerProtocol.swift; sourceTree = "<group>"; };
+		000000020000001C /* MockScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockScanner.swift; sourceTree = "<group>"; };
+		000000020000001E /* RustScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustScanner.swift; sourceTree = "<group>"; };
+		0000000200000020 /* DiskSummaryBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskSummaryBar.swift; sourceTree = "<group>"; };
+		0000000200000022 /* SplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitView.swift; sourceTree = "<group>"; };
+		0000000200000024 /* BreadcrumbBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreadcrumbBar.swift; sourceTree = "<group>"; };
+		0000000200000026 /* FileListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileListView.swift; sourceTree = "<group>"; };
+		0000000200000028 /* TreemapLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapLayout.swift; sourceTree = "<group>"; };
+		000000020000002A /* TreemapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapView.swift; sourceTree = "<group>"; };
+		000000020000002C /* FileTypeColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypeColors.swift; sourceTree = "<group>"; };
+		000000020000002E /* TreemapContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapContainer.swift; sourceTree = "<group>"; };
+		0000000200000030 /* ScanStatusModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanStatusModifier.swift; sourceTree = "<group>"; };
+		0000000200000032 /* ScanCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCoordinator.swift; sourceTree = "<group>"; };
+		0000000200000034 /* VolumeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeManager.swift; sourceTree = "<group>"; };
+		0000000200000036 /* CacheSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheSchema.swift; sourceTree = "<group>"; };
+		0000000200000038 /* CacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
+		000000020000003A /* SearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBar.swift; sourceTree = "<group>"; };
+		000000020000003C /* FileOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOperations.swift; sourceTree = "<group>"; };
+		000000020000003E /* DebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogger.swift; sourceTree = "<group>"; };
+		0000000200000040 /* SwiftScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftScanner.swift; sourceTree = "<group>"; };
+		000000A000000005 /* ScanQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanQueue.swift; sourceTree = "<group>"; };
 		0000000300000001 /* DiskSpice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DiskSpice.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -43,9 +93,12 @@
 		0000000500000002 /* DiskSpice */ = {
 			isa = PBXGroup;
 			children = (
-				0000000200000002 /* DiskSpiceApp.swift */,
-				0000000200000004 /* ContentView.swift */,
-				0000000200000006 /* Assets.xcassets */,
+				0000000500000010 /* App */,
+				0000000500000011 /* Models */,
+				0000000500000012 /* Views */,
+				0000000500000013 /* Services */,
+				0000000500000014 /* Utilities */,
+				0000000500000015 /* Resources */,
 				0000000200000008 /* DiskSpice.entitlements */,
 				0000000200000010 /* Info.plist */,
 			);
@@ -58,6 +111,108 @@
 				0000000300000001 /* DiskSpice.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		0000000500000010 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000002 /* DiskSpiceApp.swift */,
+				0000000200000012 /* AppState.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		0000000500000011 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000014 /* FileNode.swift */,
+				0000000200000016 /* VolumeInfo.swift */,
+				0000000200000018 /* NavigationState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		0000000500000012 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000004 /* ContentView.swift */,
+				0000000500000016 /* Components */,
+				0000000500000017 /* Treemap */,
+				0000000500000018 /* List */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		0000000500000013 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				000000020000001A /* ScannerProtocol.swift */,
+				000000020000001C /* MockScanner.swift */,
+				000000020000001E /* RustScanner.swift */,
+				0000000200000032 /* ScanCoordinator.swift */,
+				0000000200000034 /* VolumeManager.swift */,
+				000000020000003C /* FileOperations.swift */,
+				000000020000003E /* DebugLogger.swift */,
+				0000000200000040 /* SwiftScanner.swift */,
+				000000A000000005 /* ScanQueue.swift */,
+				0000000500000019 /* Cache */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		0000000500000019 /* Cache */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000036 /* CacheSchema.swift */,
+				0000000200000038 /* CacheManager.swift */,
+			);
+			path = Cache;
+			sourceTree = "<group>";
+		};
+		0000000500000014 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		0000000500000015 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000006 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		0000000500000016 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000020 /* DiskSummaryBar.swift */,
+				0000000200000022 /* SplitView.swift */,
+				0000000200000024 /* BreadcrumbBar.swift */,
+				0000000200000030 /* ScanStatusModifier.swift */,
+				000000020000003A /* SearchBar.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		0000000500000017 /* Treemap */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000028 /* TreemapLayout.swift */,
+				000000020000002A /* TreemapView.swift */,
+				000000020000002C /* FileTypeColors.swift */,
+				000000020000002E /* TreemapContainer.swift */,
+			);
+			path = Treemap;
+			sourceTree = "<group>";
+		};
+		0000000500000018 /* List */ = {
+			isa = PBXGroup;
+			children = (
+				0000000200000026 /* FileListView.swift */,
+			);
+			path = List;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -131,6 +286,31 @@
 			files = (
 				0000000100000001 /* DiskSpiceApp.swift in Sources */,
 				0000000100000003 /* ContentView.swift in Sources */,
+				0000000100000007 /* AppState.swift in Sources */,
+				0000000100000009 /* FileNode.swift in Sources */,
+				000000010000000B /* VolumeInfo.swift in Sources */,
+				000000010000000D /* NavigationState.swift in Sources */,
+				000000010000000F /* ScannerProtocol.swift in Sources */,
+				0000000100000011 /* MockScanner.swift in Sources */,
+				0000000100000013 /* RustScanner.swift in Sources */,
+				0000000100000015 /* DiskSummaryBar.swift in Sources */,
+				0000000100000017 /* SplitView.swift in Sources */,
+				0000000100000019 /* BreadcrumbBar.swift in Sources */,
+				000000010000001B /* FileListView.swift in Sources */,
+				000000010000001D /* TreemapLayout.swift in Sources */,
+				000000010000001F /* TreemapView.swift in Sources */,
+				0000000100000021 /* FileTypeColors.swift in Sources */,
+				0000000100000023 /* TreemapContainer.swift in Sources */,
+				0000000100000025 /* ScanStatusModifier.swift in Sources */,
+				0000000100000027 /* ScanCoordinator.swift in Sources */,
+				0000000100000029 /* VolumeManager.swift in Sources */,
+				000000010000002B /* CacheSchema.swift in Sources */,
+				000000010000002D /* CacheManager.swift in Sources */,
+				000000010000002F /* SearchBar.swift in Sources */,
+				0000000100000031 /* FileOperations.swift in Sources */,
+				0000000100000033 /* DebugLogger.swift in Sources */,
+				0000000100000035 /* SwiftScanner.swift in Sources */,
+				000000A000000006 /* ScanQueue.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
