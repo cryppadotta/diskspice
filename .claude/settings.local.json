@@ -4,7 +4,11 @@
       "Bash(git init:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(xcodebuild:*)"
+      "Bash(xcodebuild:*)",
+      "Bash(cargo new:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo run:*)",
+      "Bash(rustup target add:*)"
     ]
   }
 }

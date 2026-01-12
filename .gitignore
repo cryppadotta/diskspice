@@ -22,6 +22,7 @@ Package.resolved
 # Rust (for dust fork)
 target/
 Cargo.lock
+DiskSpice/Scanner/bin/
 
 # IDE
 .idea/
