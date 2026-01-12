@@ -1,6 +1,6 @@
 import Foundation
 
-enum FileType: String, Codable, CaseIterable {
+enum FileType: String, Codable, CaseIterable, Sendable {
     case video, audio, image
     case code, archive, application
     case system, cache, document
@@ -22,14 +22,14 @@ enum FileType: String, Codable, CaseIterable {
     }
 }
 
-enum ScanStatus: Codable, Equatable {
+enum ScanStatus: Codable, Equatable, Sendable {
     case stale
     case scanning
     case current
     case error(String)
 }
 
-struct FileNode: Identifiable, Codable, Equatable {
+struct FileNode: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let path: URL
     let name: String

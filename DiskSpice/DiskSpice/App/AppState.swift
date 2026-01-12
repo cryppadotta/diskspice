@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Scan Progress
 
-struct ScanProgress {
+struct ScanProgress: Sendable {
     var currentPath: String
     var filesScanned: Int
     var bytesScanned: Int64
