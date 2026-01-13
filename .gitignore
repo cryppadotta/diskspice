@@ -34,3 +34,6 @@ DiskSpice/Scanner/bin/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Temporary files
+.tmp/
