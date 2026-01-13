@@ -64,6 +64,7 @@ class AppState {
     // File tree cache - maps path to children
     private var fileTree: [URL: [FileNode]] = [:]
     private var sortedCache: (key: SortedNodesKey, nodes: [FileNode])?
+    private var cacheSaveTasks: [String: Task<Void, Never>] = [:]
 
     init() {
         // Default to root
@@ -72,10 +73,30 @@ class AppState {
         // Set up scan queue callback
         scanQueue.onDirectoryScanned = { [weak self] path, children in
             Task { @MainActor in
-                self?.fileTree[path] = children
+                let merged = self?.mergeChildren(existing: self?.fileTree[path] ?? [], newChildren: children) ?? children
+                self?.fileTree[path] = merged
+                self?.updateParentNode(for: path, children: merged)
                 debugLog("ScanQueue completed: \(path.path) with \(children.count) children", category: "SCAN")
+                self?.scheduleCacheSave(for: path)
             }
         }
+        scanQueue.onDirectoryProgress = { [weak self] path, filesScanned, bytesScanned in
+            Task { @MainActor in
+                self?.updateProgressNode(for: path, filesScanned: filesScanned, bytesScanned: bytesScanned)
+            }
+        }
+    }
+
+    func applyCachedTree(_ tree: [URL: [FileNode]]) {
+        for (path, children) in tree {
+            let staleChildren = children.map { node -> FileNode in
+                var updated = node
+                updated.scanStatus = .stale
+                return updated
+            }
+            fileTree[path] = staleChildren
+        }
+        sortedCache = nil
     }
 
     /// Check if a path needs scanning
@@ -138,7 +159,7 @@ class AppState {
         // This will scan it immediately if not already scanned,
         // and queue its children for scanning next
         Task { @MainActor in
-            scanQueue.prioritize(path: path)
+            scanQueue.prioritize(path: path, force: true)
         }
     }
 
@@ -219,7 +240,10 @@ class AppState {
 
     func deleteSelectedNode() {
         guard let node = selectedNode else { return }
+        deleteNode(node)
+    }
 
+    func deleteNode(_ node: FileNode) {
         // Check if confirmation is needed
         if FileOperations.requiresConfirmation(node) {
             guard FileOperations.confirmDeletion(of: node) else { return }
@@ -233,11 +257,14 @@ class AppState {
             if var children = fileTree[parentPath] {
                 children.removeAll { $0.id == node.id }
                 fileTree[parentPath] = children
+                updateParentNode(for: parentPath, children: children)
             }
 
-            // Clear selection
-            selectedNode = nil
+            if selectedNode?.id == node.id {
+                selectedNode = nil
+            }
 
+            sortedCache = nil
         } catch {
             print("Failed to delete: \(error.localizedDescription)")
         }
@@ -259,6 +286,114 @@ class AppState {
     func clearTree() {
         fileTree.removeAll()
         sortedCache = nil
+    }
+}
+
+private extension AppState {
+    func mergeChildren(existing: [FileNode], newChildren: [FileNode]) -> [FileNode] {
+        guard !existing.isEmpty else { return newChildren }
+        var existingByPath: [URL: FileNode] = [:]
+        for node in existing {
+            existingByPath[node.path] = node
+        }
+
+        return newChildren.map { child in
+            guard let existingNode = existingByPath[child.path] else { return child }
+            let existingIsCurrent: Bool
+            if case .current = existingNode.scanStatus {
+                existingIsCurrent = true
+            } else {
+                existingIsCurrent = false
+            }
+
+            let newIsCurrent: Bool
+            if case .current = child.scanStatus {
+                newIsCurrent = true
+            } else {
+                newIsCurrent = false
+            }
+
+            if existingIsCurrent && !newIsCurrent {
+                return existingNode
+            }
+
+            if child.isDirectory && !newIsCurrent && (existingNode.size > 0 || existingNode.itemCount > 0) {
+                var merged = child
+                merged.size = existingNode.size
+                merged.itemCount = existingNode.itemCount
+                merged.scanStatus = existingNode.scanStatus
+                merged.lastScanned = existingNode.lastScanned
+                return merged
+            }
+
+            if child.lastScanned == nil, let existingScanned = existingNode.lastScanned {
+                var merged = child
+                merged.lastScanned = existingScanned
+                return merged
+            }
+
+            return child
+        }
+    }
+
+    func scheduleCacheSave(for path: URL) {
+        guard let volume = volumeForPath(path) else { return }
+        let key = volume.path.path
+        cacheSaveTasks[key]?.cancel()
+        cacheSaveTasks[key] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await self?.saveCache(for: volume)
+        }
+    }
+
+    func saveCache(for volume: VolumeInfo) async {
+        let volumePath = volume.path.path
+        let treeForVolume = fileTree.filter { $0.key.path.hasPrefix(volumePath) }
+        do {
+            try await CacheManager.shared.saveTree(treeForVolume, for: volume)
+        } catch {
+            debugLog("Cache save failed: \(error)", category: "CACHE")
+        }
+    }
+
+    func volumeForPath(_ path: URL) -> VolumeInfo? {
+        volumes.first { path.path.hasPrefix($0.path.path) }
+    }
+
+    func updateParentNode(for path: URL, children: [FileNode]) {
+        let parentPath = path.deletingLastPathComponent()
+        var existingChildren = fileTree[parentPath] ?? []
+        guard let index = existingChildren.firstIndex(where: { $0.path == path }) else { return }
+
+        var node = existingChildren[index]
+        node.size = children.reduce(0) { $0 + $1.effectiveSize }
+        node.itemCount = children.count
+        node.scanStatus = .current
+        node.lastScanned = Date()
+        existingChildren[index] = node
+
+        fileTree[parentPath] = existingChildren
+        if parentPath == navigationState.currentPath {
+            sortedCache = nil
+        }
+    }
+
+    func updateProgressNode(for path: URL, filesScanned: Int, bytesScanned: Int64) {
+        let parentPath = path.deletingLastPathComponent()
+        var existingChildren = fileTree[parentPath] ?? []
+        guard let index = existingChildren.firstIndex(where: { $0.path == path }) else { return }
+
+        var node = existingChildren[index]
+        node.size = bytesScanned
+        node.itemCount = filesScanned
+        node.scanStatus = .scanning
+        existingChildren[index] = node
+
+        fileTree[parentPath] = existingChildren
+        if parentPath == navigationState.currentPath {
+            sortedCache = nil
+        }
     }
 }
 

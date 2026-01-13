@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct FileListView: View {
     @Bindable var appState: AppState
@@ -33,12 +34,14 @@ struct FileListView: View {
                                 isSelected: appState.selectedNode?.id == node.id,
                                 isActivelyScanning: appState.isCurrentlyScanning(path: node.path),
                                 onSelect: {
-                                    appState.selectNode(node)
-                                },
-                                onNavigate: {
                                     if node.isDirectory {
                                         appState.navigateTo(node.path)
+                                    } else {
+                                        appState.selectNode(node)
                                     }
+                                },
+                                onDelete: {
+                                    appState.deleteNode(node)
                                 }
                             )
                             .id(node.id)
@@ -107,6 +110,9 @@ struct FileListHeader: View {
                 onSort: onSort
             )
             .frame(width: 100)
+
+            Color.clear
+                .frame(width: 20)
         }
         .font(.system(size: 11, weight: .medium))
         .padding(.horizontal, 16)
@@ -176,7 +182,7 @@ struct FileListRow: View {
     let isSelected: Bool
     let isActivelyScanning: Bool  // This folder is currently being scanned
     let onSelect: () -> Void
-    let onNavigate: () -> Void
+    let onDelete: () -> Void
     var onRefresh: (() -> Void)? = nil
 
     @Environment(\.colorScheme) var colorScheme
@@ -197,11 +203,10 @@ struct FileListRow: View {
     var body: some View {
         ZStack(alignment: .leading) {
             // Size bar background
-            GeometryReader { geometry in
-                Rectangle()
-                    .fill(FileTypeColors.color(for: node.fileType, scheme: colorScheme).opacity(0.12))
-                    .frame(width: geometry.size.width * sizePercentage)
-            }
+            Rectangle()
+                .fill(FileTypeColors.color(for: node.fileType, scheme: colorScheme).opacity(0.12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .scaleEffect(x: sizePercentage, y: 1, anchor: .leading)
 
             // Row content
             HStack(spacing: 0) {
@@ -229,10 +234,10 @@ struct FileListRow: View {
                 }
 
                 // Size
-                Text(formatBytes(node.size))
+                Text(sizeText)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .frame(width: 80, alignment: .trailing)
+                    .frame(width: 100, alignment: .trailing)
 
                 // Item count
                 Text(node.isDirectory ? "\(node.itemCount)" : "-")
@@ -245,18 +250,27 @@ struct FileListRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
                     .frame(width: 100, alignment: .trailing)
+
+                TrashButton(action: {
+                    playTrashSound()
+                    onDelete()
+                })
+                .opacity(isHovering ? 1 : 0)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
         .background(rowBackground)
         .contentShape(Rectangle())
-        .scanStatus(node.scanStatus)
-        .onTapGesture(count: 2) {
-            onNavigate()
-        }
+        .scanStatus(node.scanStatus, showShimmer: false)
         .onTapGesture {
             onSelect()
+        }
+        .contextMenu {
+            Button("Move to Trash", systemImage: "trash") {
+                playTrashSound()
+                onDelete()
+            }
         }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.1)) {
@@ -289,16 +303,51 @@ struct FileListRow: View {
         }
     }
 
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter
+    }()
+
     private func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        Self.byteFormatter.string(fromByteCount: bytes)
     }
 
     private func formatDate(_ date: Date?) -> String {
         guard let date = date else { return "-" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
+        return Self.dateFormatter.string(from: date)
+    }
+
+    private var sizeText: String {
+        guard node.isDirectory else {
+            return formatBytes(node.size)
+        }
+
+        if case .scanning = node.scanStatus, node.size > 0 {
+            return "≈ \(formatBytes(node.size))"
+        }
+
+        if node.lastScanned == nil {
+            return "Calculating"
+        }
+
+        switch node.scanStatus {
+        case .stale, .scanning:
+            return "Calculating"
+        case .current, .error:
+            return formatBytes(node.size)
+        }
+    }
+
+    private func playTrashSound() {
+        NSSound(named: NSSound.Name("moveToTrash"))?.play()
     }
 }
 
@@ -330,6 +379,23 @@ struct RefreshButton: View {
         }
         .disabled(isScanning)
         .help(isScanning ? "Scanning..." : "Rescan folder")
+    }
+}
+
+// MARK: - Trash Button
+
+struct TrashButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "trash")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .help("Move to Trash")
     }
 }
 

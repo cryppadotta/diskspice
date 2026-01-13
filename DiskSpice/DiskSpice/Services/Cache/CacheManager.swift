@@ -38,9 +38,9 @@ actor CacheManager {
 
         // Flatten tree to entries
         var allEntries: [CacheEntry] = []
-        for (_, children) in tree {
+        for (parentPath, children) in tree {
             for node in children {
-                allEntries.append(CacheEntry(from: node))
+                allEntries.append(CacheEntry(from: node, parentPath: parentPath))
             }
         }
 
@@ -91,6 +91,37 @@ actor CacheManager {
 
         loadedCaches[volumePath.path] = cacheFile
         return cacheFile.entries.map { $0.toFileNode() }
+    }
+
+    /// Load cached tree for a volume
+    func loadTree(for volumePath: URL) async throws -> [URL: [FileNode]]? {
+        let fileURL = CachePaths.cacheFile(for: volumePath)
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: fileURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let cacheFile = try decoder.decode(CacheFile.self, from: data)
+
+        guard cacheFile.isCompatible else {
+            try? FileManager.default.removeItem(at: fileURL)
+            return nil
+        }
+
+        var tree: [URL: [FileNode]] = [:]
+        for entry in cacheFile.entries {
+            let node = entry.toFileNode()
+            let parentPath = entry.parentPath.map { URL(fileURLWithPath: $0) }
+                ?? node.path.deletingLastPathComponent()
+            tree[parentPath, default: []].append(node)
+        }
+
+        loadedCaches[volumePath.path] = cacheFile
+        return tree
     }
 
     /// Load all cached volumes

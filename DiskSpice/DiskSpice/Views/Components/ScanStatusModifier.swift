@@ -5,6 +5,7 @@ import SwiftUI
 struct ScanStatusModifier: ViewModifier {
     let status: ScanStatus
     var onRetry: (() -> Void)?
+    var showShimmer: Bool = true
 
     @State private var shimmerOffset: CGFloat = -1
 
@@ -13,7 +14,7 @@ struct ScanStatusModifier: ViewModifier {
             .opacity(opacity)
             .saturation(saturation)
             .overlay {
-                if case .scanning = status {
+                if showShimmer, case .scanning = status {
                     ShimmerOverlay(offset: shimmerOffset)
                         .onAppear {
                             withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
@@ -119,8 +120,8 @@ struct ErrorBadge: View {
 // MARK: - View Extension
 
 extension View {
-    func scanStatus(_ status: ScanStatus, onRetry: (() -> Void)? = nil) -> some View {
-        modifier(ScanStatusModifier(status: status, onRetry: onRetry))
+    func scanStatus(_ status: ScanStatus, onRetry: (() -> Void)? = nil, showShimmer: Bool = true) -> some View {
+        modifier(ScanStatusModifier(status: status, onRetry: onRetry, showShimmer: showShimmer))
     }
 }
 

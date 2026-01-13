@@ -11,6 +11,7 @@ struct CacheVersion {
 /// Represents a single cached file/folder entry
 struct CacheEntry: Codable {
     let path: String
+    let parentPath: String?
     let name: String
     let size: Int64
     let isDirectory: Bool
@@ -23,8 +24,9 @@ struct CacheEntry: Codable {
     let scanStatus: String
     let childPaths: [String]?
 
-    init(from node: FileNode) {
+    init(from node: FileNode, parentPath: URL? = nil) {
         self.path = node.path.path
+        self.parentPath = parentPath?.path
         self.name = node.name
         self.size = node.size
         self.isDirectory = node.isDirectory

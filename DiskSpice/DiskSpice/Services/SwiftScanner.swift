@@ -30,6 +30,10 @@ class SwiftScanner {
         self.progressCallback = callback
     }
 
+    func clearProgressCallback() {
+        progressCallback = nil
+    }
+
     /// Report progress to callback
     private func reportProgress(path: String, size: Int64 = 0) {
         filesScanned += 1
@@ -132,7 +136,7 @@ class SwiftScanner {
             node.modifiedDate = modifiedDate
             node.isSymlink = isSymlink
             node.fileType = classifyFileType(url: url, isDirectory: isDirectory)
-            node.scanStatus = isDirectory ? .stale : .current // Mark directories as needing scan
+            node.scanStatus = isDirectory ? .scanning : .current // Mark directories as partial until fully scanned
 
             if isSymlink {
                 // For symlinks, get the target but don't follow for size

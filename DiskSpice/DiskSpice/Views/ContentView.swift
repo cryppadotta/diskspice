@@ -48,6 +48,14 @@ struct ContentView: View {
             appState.deleteSelectedNode()
             return .handled
         }
+        .onKeyPress(.leftArrow) {
+            appState.goUp()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            appState.navigateToSelected()
+            return .handled
+        }
         .onAppear {
             setupCoordinator()
             loadMockData()
@@ -93,11 +101,25 @@ struct ContentView: View {
         // At root level, show volumes as children
         appState.updateChildren(at: URL(fileURLWithPath: "/"), children: volumeNodes)
 
-        // Auto-start scanning the main volume (usually the first/largest one)
-        if let mainVolume = volumes.first {
-            debugLog("Auto-starting scan of \(mainVolume.path.path)", category: "APP")
-            // Queue the main volume for scanning with high priority
-            appState.scanQueue.prioritize(path: mainVolume.path)
+        Task {
+            for volume in volumes {
+                do {
+                    if let tree = try await CacheManager.shared.loadTree(for: volume.path) {
+                        await MainActor.run {
+                            appState.applyCachedTree(tree)
+                        }
+                    }
+                } catch {
+                    debugLog("Cache load failed for \(volume.path.path): \(error)", category: "CACHE")
+                }
+            }
+
+            // Auto-start scanning the main volume (usually the first/largest one)
+            if let mainVolume = volumes.first {
+                debugLog("Auto-starting scan of \(mainVolume.path.path)", category: "APP")
+                // Queue the main volume for scanning with high priority
+                appState.scanQueue.prioritize(path: mainVolume.path)
+            }
         }
     }
 

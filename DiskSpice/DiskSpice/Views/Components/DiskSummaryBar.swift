@@ -311,6 +311,43 @@ struct ScanProgressBar: View {
     }
 }
 
+struct ScanCompletedBar: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.green)
+
+            Text("Completed")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.green.opacity(0.12),
+                        Color.green.opacity(0.04)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+
+                VStack {
+                    Rectangle()
+                        .fill(Color.green.opacity(0.5))
+                        .frame(height: 2)
+                    Spacer()
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Scan Progress Wrapper (Isolates observation)
 
 struct ScanProgressWrapper: View {
@@ -319,6 +356,9 @@ struct ScanProgressWrapper: View {
     var body: some View {
         if scanQueue.isScanning, let progress = scanQueue.progress {
             ScanProgressBar(progress: progress)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        } else if scanQueue.isCompleted {
+            ScanCompletedBar()
                 .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
