@@ -52,6 +52,12 @@ pub struct Scanner {
     flush_batch_size: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ScanTotals {
+    pub total_size: u64,
+    pub total_items: u64,
+}
+
 impl Scanner {
     pub fn new() -> Self {
         Scanner {
@@ -150,7 +156,7 @@ impl Scanner {
             return;
         }
 
-        let (total_size, total_items) = self.scan_directory(path);
+        let (total_size, total_items) = self.scan_directory(path, true);
 
         self.emit(ScanMessage::Done {
             total_size,
@@ -158,7 +164,7 @@ impl Scanner {
         });
     }
 
-    fn scan_directory(&mut self, path: &Path) -> (u64, u64) {
+    fn scan_directory(&mut self, path: &Path, emit_entries: bool) -> (u64, u64) {
         let mut total_size: u64 = 0;
         let mut total_items: u64 = 0;
 
@@ -170,7 +176,9 @@ impl Scanner {
         let entries = match fs::read_dir(path) {
             Ok(entries) => entries,
             Err(e) => {
-                self.emit_error(&path.display().to_string(), &e.to_string());
+                if emit_entries {
+                    self.emit_error(&path.display().to_string(), &e.to_string());
+                }
                 return (0, 0);
             }
         };
@@ -201,7 +209,7 @@ impl Scanner {
             let is_dir = metadata.is_dir();
 
             let (size, item_count) = if is_dir && !is_symlink {
-                self.scan_directory(&entry_path)
+                self.scan_directory(&entry_path, emit_entries)
             } else {
                 (metadata.len(), 1)
             };
@@ -228,16 +236,20 @@ impl Scanner {
                 file_type,
             };
 
-            self.emit_entry(file_entry);
+            if emit_entries {
+                self.emit_entry(file_entry);
+            }
 
             total_size += size;
             total_items += item_count;
         }
 
-        self.emit(ScanMessage::FolderComplete {
-            path: path.display().to_string(),
-            total_size,
-        });
+        if emit_entries {
+            self.emit(ScanMessage::FolderComplete {
+                path: path.display().to_string(),
+                total_size,
+            });
+        }
 
         (total_size, total_items)
     }
@@ -298,5 +310,100 @@ impl Scanner {
 impl Default for Scanner {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub fn compute_directory_totals(path: &Path) -> io::Result<ScanTotals> {
+    if !path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Path does not exist",
+        ));
+    }
+
+    let mut scanner = Scanner::new();
+    let (total_size, total_items) = scanner.scan_directory(path, false);
+    Ok(ScanTotals {
+        total_size,
+        total_items,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::os::unix::fs as unix_fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_dir(test_name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!(
+            "diskspice_scanner_test_{}_{}_{}",
+            test_name,
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    fn write_bytes(path: &Path, size: usize) {
+        let mut file = File::create(path).expect("create file");
+        let buffer = vec![0u8; size];
+        file.write_all(&buffer).expect("write bytes");
+    }
+
+    #[test]
+    fn scan_directory_sums_nested_files() {
+        let root = create_temp_dir("nested");
+        write_bytes(&root.join("a.txt"), 10);
+        fs::create_dir_all(root.join("sub")).expect("create subdir");
+        write_bytes(&root.join("sub/b.bin"), 20);
+
+        let mut scanner = Scanner::new();
+        let (total_size, total_items) = scanner.scan_directory(&root, false);
+
+        assert_eq!(total_size, 30);
+        assert_eq!(total_items, 2);
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn scan_directory_does_not_recurse_symlinked_dir() {
+        let root = create_temp_dir("symlink");
+        fs::create_dir_all(root.join("target")).expect("create target");
+        write_bytes(&root.join("target/inside.txt"), 8);
+        unix_fs::symlink(root.join("target"), root.join("link")).expect("symlink");
+
+        let mut scanner = Scanner::new();
+        let (_total_size, total_items) = scanner.scan_directory(&root, false);
+
+        assert_eq!(total_items, 2, "counts only file + symlink entry");
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn compute_directory_totals_requires_existing_path() {
+        let mut missing = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        missing.push(format!(
+            "diskspice_scanner_missing_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+        let result = compute_directory_totals(&missing);
+        assert!(result.is_err());
     }
 }
