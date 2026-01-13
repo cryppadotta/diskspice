@@ -343,8 +343,9 @@ actor ScanQueueWorker {
     private func popNextTask() -> ScanTask? {
         guard !tasks.isEmpty else { return nil }
         if let focusRoot {
-            if let index = tasks.firstIndex(where: { pathHasPrefix($0.path, prefix: focusRoot) }) {
-                return tasks.remove(at: index)
+            let focusIndices = tasks.enumerated().filter { pathHasPrefix($0.element.path, prefix: focusRoot) }
+            if let deepest = focusIndices.max(by: { $0.element.depth < $1.element.depth }) {
+                return tasks.remove(at: deepest.offset)
             }
             if exclusiveFocusMode {
                 tasks.removeAll()
