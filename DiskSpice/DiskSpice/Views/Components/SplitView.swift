@@ -31,10 +31,10 @@ struct SplitView<Left: View, Right: View>: View {
             let leftWidth = max(minLeftWidth, min(totalWidth - minRightWidth - dividerWidth, totalWidth * splitRatio))
             let rightWidth = totalWidth - leftWidth - dividerWidth
 
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 // Left panel
                 left
-                    .frame(width: leftWidth)
+                    .frame(width: leftWidth, height: geometry.size.height, alignment: .top)
 
                 // Divider
                 SplitDivider(isDragging: $isDragging)
@@ -54,8 +54,9 @@ struct SplitView<Left: View, Right: View>: View {
 
                 // Right panel
                 right
-                    .frame(width: rightWidth)
+                    .frame(width: rightWidth, height: geometry.size.height, alignment: .top)
             }
+            .frame(width: totalWidth, height: geometry.size.height, alignment: .topLeading)
         }
     }
 }

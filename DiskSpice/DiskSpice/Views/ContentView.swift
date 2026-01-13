@@ -1,7 +1,8 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
-    @State private var appState = AppState()
+    @Bindable var appState: AppState
     @State private var splitRatio: CGFloat = 0.55
     @State private var coordinator: ScanCoordinator?
 
@@ -11,7 +12,7 @@ struct ContentView: View {
             DiskSummaryBar(appState: appState)
 
             // Scan progress bar (isolated observation to prevent view churn)
-            ScanProgressWrapper(scanQueue: appState.scanQueue)
+            ScanProgressWrapper(scanQueue: appState.scanQueue, basePath: appState.navigationState.currentPath)
 
             // Navigation bar (breadcrumbs)
             BreadcrumbBar(appState: appState)
@@ -25,8 +26,11 @@ struct ContentView: View {
             } right: {
                 TreemapContainer(appState: appState)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
         }
         .frame(minWidth: 800, minHeight: 600)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .focusable()
         .onKeyPress(.escape) {
             appState.goBack()
@@ -59,6 +63,10 @@ struct ContentView: View {
         .onAppear {
             setupCoordinator()
             loadMockData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            appState.coordinator?.cancelScan()
+            appState.scanQueue.stopScanning()
         }
     }
 
@@ -159,5 +167,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(appState: AppState())
 }

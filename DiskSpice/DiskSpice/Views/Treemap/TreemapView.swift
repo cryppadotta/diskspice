@@ -7,11 +7,14 @@ struct TreemapView: View {
     let onSelect: (FileNode) -> Void
     let onNavigate: (FileNode) -> Void
     let onHover: (FileNode?) -> Void
+    let onDelete: (FileNode) -> Void
+    let onRevealInFinder: (FileNode) -> Void
 
     @Environment(\.colorScheme) var colorScheme
     @State private var rects: [TreemapRect] = []
     @State private var viewSize: CGSize = .zero
     @State private var hoverLocation: CGPoint? = nil
+    @State private var contextNode: FileNode? = nil
     @State private var layoutTask: Task<Void, Never>?
     @State private var lastLayoutSignature: Int? = nil
 
@@ -61,6 +64,16 @@ struct TreemapView: View {
             .contentShape(Rectangle()) // Enable hit testing on full area
             .onTapGesture { location in
                 handleTap(at: location)
+            }
+            .contextMenu {
+                if let node = contextNode {
+                    Button("Move to Trash", systemImage: "trash") {
+                        onDelete(node)
+                    }
+                    Button("Open Enclosing Folder in Finder", systemImage: "folder") {
+                        onRevealInFinder(node)
+                    }
+                }
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
@@ -341,10 +354,12 @@ struct TreemapView: View {
         if let rect = rects.first(where: { $0.frame.contains(location) }) {
             if hoveredId != rect.id {
                 onHover(rect.node)
+                contextNode = rect.isOtherGroup ? nil : rect.node
                 NSCursor.pointingHand.set()
             }
         } else {
             onHover(nil)
+            contextNode = nil
             NSCursor.arrow.set()
         }
     }
@@ -420,6 +435,13 @@ struct TreemapTooltip: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
+
+            if case .error(let message) = node.scanStatus {
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
         }
         .padding(10)
         .background {
@@ -446,13 +468,15 @@ struct TreemapTooltip: View {
         FileNode(path: URL(fileURLWithPath: "/Downloads"), name: "Downloads", size: 5_000_000_000, isDirectory: true),
     ]
 
-    return TreemapView(
+    TreemapView(
         nodes: nodes,
         selectedId: nil,
         hoveredId: nil,
         onSelect: { _ in },
         onNavigate: { _ in },
-        onHover: { _ in }
+        onHover: { _ in },
+        onDelete: { _ in },
+        onRevealInFinder: { _ in }
     )
     .frame(width: 600, height: 400)
 }

@@ -27,6 +27,7 @@ struct BreadcrumbBar: View {
 
             // Breadcrumbs
             BreadcrumbPath(
+                appState: appState,
                 breadcrumbs: appState.navigationState.breadcrumbs,
                 onSelect: { url in
                     appState.navigateTo(url)
@@ -97,6 +98,7 @@ struct NavigationButton: View {
 // MARK: - Breadcrumb Path
 
 struct BreadcrumbPath: View {
+    let appState: AppState
     let breadcrumbs: [URL]
     let onSelect: (URL) -> Void
 
@@ -111,6 +113,8 @@ struct BreadcrumbPath: View {
                     }
 
                     BreadcrumbItem(
+                        appState: appState,
+                        url: url,
                         name: displayName(for: url),
                         isLast: index == breadcrumbs.count - 1
                     ) {
@@ -133,6 +137,8 @@ struct BreadcrumbPath: View {
 // MARK: - Breadcrumb Item
 
 struct BreadcrumbItem: View {
+    let appState: AppState
+    let url: URL
     let name: String
     let isLast: Bool
     let action: () -> Void
@@ -153,6 +159,16 @@ struct BreadcrumbItem: View {
                 }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if let node = appState.nodeForPath(url) {
+                Button("Move to Trash", systemImage: "trash") {
+                    appState.deleteNode(node)
+                }
+            }
+            Button("Open Enclosing Folder in Finder", systemImage: "folder") {
+                FileOperations.revealInFinder(url)
+            }
+        }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isHovering = hovering
@@ -165,6 +181,6 @@ struct BreadcrumbItem: View {
 
 #Preview {
     let state = AppState()
-    return BreadcrumbBar(appState: state)
+    BreadcrumbBar(appState: state)
         .frame(width: 600)
 }

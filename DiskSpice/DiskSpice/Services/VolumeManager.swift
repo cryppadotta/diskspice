@@ -6,6 +6,7 @@ class VolumeManager {
         .volumeNameKey,
         .volumeTotalCapacityKey,
         .volumeAvailableCapacityKey,
+        .volumeAvailableCapacityForImportantUsageKey,
         .volumeIsRemovableKey,
         .volumeIsEjectableKey,
         .volumeIsLocalKey,
@@ -27,7 +28,12 @@ class VolumeManager {
 
                 let name = resourceValues.volumeName ?? url.lastPathComponent
                 let totalSize = Int64(resourceValues.volumeTotalCapacity ?? 0)
-                let freeSize = Int64(resourceValues.volumeAvailableCapacity ?? 0)
+                let freeSize: Int64
+                if let important = resourceValues.volumeAvailableCapacityForImportantUsage {
+                    freeSize = important
+                } else {
+                    freeSize = Int64(resourceValues.volumeAvailableCapacity ?? 0)
+                }
                 let usedSize = totalSize - freeSize
 
                 // Skip volumes with no size (virtual volumes)
@@ -58,7 +64,12 @@ class VolumeManager {
             let resourceValues = try volume.path.resourceValues(forKeys: Set(resourceKeys))
 
             let totalSize = Int64(resourceValues.volumeTotalCapacity ?? 0)
-            let freeSize = Int64(resourceValues.volumeAvailableCapacity ?? 0)
+            let freeSize: Int64
+            if let important = resourceValues.volumeAvailableCapacityForImportantUsage {
+                freeSize = important
+            } else {
+                freeSize = Int64(resourceValues.volumeAvailableCapacity ?? 0)
+            }
             let usedSize = totalSize - freeSize
 
             return VolumeInfo(

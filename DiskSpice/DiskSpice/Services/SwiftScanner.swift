@@ -99,7 +99,7 @@ class SwiftScanner {
     ]
 
     /// Scan immediate children of a directory
-    func scanDirectory(at path: URL, startingAt offset: Int) async -> ScanDirectoryResult {
+    func scanDirectory(at path: URL, startingAt offset: Int, forceFullPass: Bool = false) async -> ScanDirectoryResult {
         // Reset counters for new scan
         filesScanned = 0
         bytesScanned = 0
@@ -111,26 +111,33 @@ class SwiftScanner {
             var processed = 0
             var didHitBudget = false
             var reachedEnd = true
+            let effectiveOffset = forceFullPass ? 0 : offset
 
             guard let enumerator = fileManager.enumerator(
                 at: path,
                 includingPropertiesForKeys: resourceKeys,
                 options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants],
-                errorHandler: { _, _ in true }
+                errorHandler: { url, error in
+                    debugError("SwiftScanner: failed to enumerate \(url.path)", error: error)
+                    return true
+                }
             ) else {
+                debugLog("SwiftScanner: failed to enumerate \(path.path)", category: "SCAN")
                 return ScanDirectoryResult(nodes: [], isComplete: true, nextOffset: offset)
             }
 
             for case let url as URL in enumerator {
                 entriesScanned += 1
-                if entriesScanned <= offset {
+                if entriesScanned <= effectiveOffset {
                     continue
                 }
 
-                if processed >= maxEntriesPerPass || Date().timeIntervalSince(start) > scanTimeBudget {
-                    didHitBudget = true
-                    reachedEnd = false
-                    break
+                if !forceFullPass {
+                    if processed >= maxEntriesPerPass || Date().timeIntervalSince(start) > scanTimeBudget {
+                        didHitBudget = true
+                        reachedEnd = false
+                        break
+                    }
                 }
 
                 if let node = await scanItem(at: url) {
@@ -141,7 +148,11 @@ class SwiftScanner {
             }
 
             let sorted = nodes.sorted { $0.size > $1.size }
-            let nextOffset = offset + processed
+            let nextOffset = effectiveOffset + processed
+            debugLog(
+                "SwiftScanner: scanned \(processed) entries (offset \(effectiveOffset)) in \(path.path), complete=\(!didHitBudget && reachedEnd), forceFullPass=\(forceFullPass)",
+                category: "SCAN"
+            )
             return ScanDirectoryResult(nodes: sorted, isComplete: !didHitBudget && reachedEnd, nextOffset: nextOffset)
 
         } catch {
@@ -209,6 +220,7 @@ class SwiftScanner {
 
         } catch {
             // Permission denied or other error - still return a node with error status
+            debugError("SwiftScanner: failed to read \(url.path)", error: error)
             var node = FileNode(
                 path: url,
                 name: url.lastPathComponent,

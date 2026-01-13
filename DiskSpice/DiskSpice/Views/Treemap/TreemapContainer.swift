@@ -43,6 +43,12 @@ struct TreemapContainer: View {
                     },
                     onHover: { node in
                         hoveredId = node?.id
+                    },
+                    onDelete: { node in
+                        appState.deleteNode(node)
+                    },
+                    onRevealInFinder: { node in
+                        FileOperations.revealInFinder(node.path)
                     }
                 )
                 .opacity(zoomOpacity)
@@ -174,16 +180,26 @@ struct ZoomOverlay: View {
 // MARK: - Preview
 
 #Preview {
-    let state = AppState()
+    TreemapContainerPreview()
+}
 
-    // Add mock data
-    let mockChildren: [FileNode] = [
-        FileNode(path: URL(fileURLWithPath: "/Users"), name: "Users", size: 150_000_000_000, isDirectory: true),
-        FileNode(path: URL(fileURLWithPath: "/Applications"), name: "Applications", size: 50_000_000_000, isDirectory: true),
-        FileNode(path: URL(fileURLWithPath: "/Library"), name: "Library", size: 30_000_000_000, isDirectory: true),
-    ]
-    state.updateChildren(at: URL(fileURLWithPath: "/"), children: mockChildren)
+@MainActor
+private struct TreemapContainerPreview: View {
+    @State private var state: AppState
 
-    return TreemapContainer(appState: state)
-        .frame(width: 600, height: 400)
+    init() {
+        let state = AppState()
+        let mockChildren: [FileNode] = [
+            FileNode(path: URL(fileURLWithPath: "/Users"), name: "Users", size: 150_000_000_000, isDirectory: true),
+            FileNode(path: URL(fileURLWithPath: "/Applications"), name: "Applications", size: 50_000_000_000, isDirectory: true),
+            FileNode(path: URL(fileURLWithPath: "/Library"), name: "Library", size: 30_000_000_000, isDirectory: true),
+        ]
+        state.updateChildren(at: URL(fileURLWithPath: "/"), children: mockChildren)
+        _state = State(initialValue: state)
+    }
+
+    var body: some View {
+        TreemapContainer(appState: state)
+            .frame(width: 600, height: 400)
+    }
 }
