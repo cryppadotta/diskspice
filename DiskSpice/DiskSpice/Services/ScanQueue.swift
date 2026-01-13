@@ -149,14 +149,17 @@ enum ScanQueueUpdate: Sendable {
 actor ScanQueueWorker {
     private var updateHandler: (@Sendable (ScanQueueUpdate) async -> Void)?
     private var scanTask: Task<Void, Never>?
-    private let scanWorker = SwiftScanWorker()
 
     private var tasks: [ScanTask] = []
+    private var deferredTasks: [ScanTask] = []
     private var scannedPaths: Set<URL> = []
     private var focusRoot: URL?
     private var completedExclusiveFocus = false
     private let exclusiveFocusMode = true
     private var partialOffsets: [URL: Int] = [:]
+    private var inFlight: Set<URL> = []
+    private let maxConcurrentScans = 2
+    private let maxQueuedTasks = 200
 
     // Cumulative stats across all scans
     private var totalFilesScanned: Int = 0
@@ -190,7 +193,9 @@ actor ScanQueueWorker {
     func reset() {
         stopScanning()
         tasks.removeAll()
+        deferredTasks.removeAll()
         scannedPaths.removeAll()
+        inFlight.removeAll()
         Task { await sendUpdate(.queuedCount(0)) }
     }
 
@@ -211,6 +216,7 @@ actor ScanQueueWorker {
         completedExclusiveFocus = false
         if exclusiveFocusMode {
             tasks = tasks.filter { pathHasPrefix($0.path, prefix: path) }
+            deferredTasks = deferredTasks.filter { pathHasPrefix($0.path, prefix: path) }
         }
         tasks.removeAll { $0.path == path }
         let task = ScanTask(path: path, priority: .high, depth: pathDepth(path))
@@ -222,7 +228,7 @@ actor ScanQueueWorker {
 
     func enqueue(path: URL, priority: ScanPriority = .low) {
         guard !scannedPaths.contains(path) else { return }
-        guard !tasks.contains(where: { $0.path == path }) else { return }
+        guard !containsTask(path: path) else { return }
 
         let resolvedPriority: ScanPriority
         if let focusRoot, pathHasPrefix(path, prefix: focusRoot) {
@@ -234,12 +240,7 @@ actor ScanQueueWorker {
         }
 
         let task = ScanTask(path: path, priority: resolvedPriority, depth: pathDepth(path))
-
-        if let insertIndex = tasks.firstIndex(where: { $0.priority > resolvedPriority || ($0.priority == resolvedPriority && $0.depth > task.depth) }) {
-            tasks.insert(task, at: insertIndex)
-        } else {
-            tasks.append(task)
-        }
+        enqueueTask(task)
 
         updateQueueCount()
     }
@@ -257,6 +258,7 @@ actor ScanQueueWorker {
     func markScanned(path: URL) {
         scannedPaths.insert(path)
         tasks.removeAll { $0.path == path }
+        deferredTasks.removeAll { $0.path == path }
         updateQueueCount()
     }
 
@@ -269,78 +271,115 @@ actor ScanQueueWorker {
         }
 
         while !Task.isCancelled {
-            guard let task = popNextTask() else {
+            drainDeferredTasksIfNeeded()
+            while inFlight.count < maxConcurrentScans {
+                guard let task = popNextTask() else { break }
+                if scannedPaths.contains(task.path) {
+                    continue
+                }
+                startScanTask(task)
+            }
+
+            if inFlight.isEmpty && tasks.isEmpty {
                 if completedExclusiveFocus {
                     await sendUpdate(.scanLoopEnded(true))
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(100))
-                continue
-            }
-
-            if scannedPaths.contains(task.path) {
-                continue
-            }
-
-            await sendUpdate(.currentTask(task))
-            await sendUpdate(.isScanning(true))
-            updateProgressThrottled(path: task.path.path)
-
-            await scanWorker.setProgressHandler { [weak self] filesScanned, bytesScanned in
-                await self?.updateDirectoryProgressThrottled(
-                    path: task.path,
-                    filesScanned: filesScanned,
-                    bytesScanned: bytesScanned
-                )
-            }
-
-            let scannedAt = Date()
-            let offset = partialOffsets[task.path] ?? 0
-            let result = await scanWorker.scanDirectory(at: task.path, startingAt: offset)
-            let childrenWithMetadata = result.nodes.map { child -> FileNode in
-                var node = child
-                if node.lastScanned == nil {
-                    node.lastScanned = scannedAt
-                }
-                return node
-            }
-            await scanWorker.clearProgressHandler()
-
-            totalFilesScanned += childrenWithMetadata.count
-            for child in childrenWithMetadata {
-                totalBytesScanned += child.size
-            }
-
-            updateProgressThrottled(path: task.path.path, force: true)
-            if result.isComplete {
-                scannedPaths.insert(task.path)
-                partialOffsets.removeValue(forKey: task.path)
             } else {
-                partialOffsets[task.path] = result.nextOffset
+                try? await Task.sleep(for: .milliseconds(50))
             }
-            await sendUpdate(.directoryScanned(task.path, childrenWithMetadata, result.isComplete))
-
-            if result.isComplete {
-                let childPriority: ScanPriority = task.priority == .high ? .medium : .low
-                for child in childrenWithMetadata where child.isDirectory {
-                    if case .current = child.scanStatus {
-                        continue
-                    }
-                    enqueue(path: child.path, priority: childPriority)
-                }
-            } else {
-                enqueue(path: task.path, priority: .high)
-            }
-
-            debugLog("ScanQueue: completed \(task.path.path), found \(childrenWithMetadata.count) children, total scanned: \(totalFilesScanned)", category: "QUEUE")
-            updateQueueCount()
         }
 
         debugLog("ScanQueue: scan loop ended", category: "QUEUE")
         await sendUpdate(.scanLoopEnded(false))
     }
 
+    private func startScanTask(_ task: ScanTask) {
+        inFlight.insert(task.path)
+        if inFlight.count == 1 {
+            Task { await sendUpdate(.isScanning(true)) }
+        }
+        Task { await sendUpdate(.currentTask(task)) }
+        updateProgressThrottled(path: task.path.path)
+        Task { [weak self] in
+            guard let self else { return }
+            let scannedAt = Date()
+            let offset = await self.offsetForPath(task.path)
+            let result = await self.performScan(task: task, offset: offset)
+            await self.handleScanResult(task: task, scannedAt: scannedAt, result: result)
+        }
+    }
+
+    private func offsetForPath(_ path: URL) -> Int {
+        partialOffsets[path] ?? 0
+    }
+
+    nonisolated private func performScan(task: ScanTask, offset: Int) async -> ScanDirectoryResult {
+        let scanner = SwiftScanner()
+        scanner.setProgressCallback { _, filesScanned, bytesScanned in
+            Task { [weak self] in
+                await self?.updateDirectoryProgressThrottled(
+                    path: task.path,
+                    filesScanned: filesScanned,
+                    bytesScanned: bytesScanned
+                )
+            }
+        }
+        let result = await scanner.scanDirectory(at: task.path, startingAt: offset)
+        scanner.clearProgressCallback()
+        return result
+    }
+
+    private func handleScanResult(task: ScanTask, scannedAt: Date, result: ScanDirectoryResult) async {
+        let childrenWithMetadata = result.nodes.map { child -> FileNode in
+            var node = child
+            if node.lastScanned == nil {
+                node.lastScanned = scannedAt
+            }
+            return node
+        }
+
+        updateProgressThrottled(path: task.path.path, force: true)
+
+        totalFilesScanned += childrenWithMetadata.count
+        for child in childrenWithMetadata {
+            totalBytesScanned += child.size
+        }
+
+        if result.isComplete {
+            scannedPaths.insert(task.path)
+            partialOffsets.removeValue(forKey: task.path)
+        } else {
+            partialOffsets[task.path] = result.nextOffset
+        }
+
+        await sendUpdate(.directoryScanned(task.path, childrenWithMetadata, result.isComplete))
+
+        if result.isComplete {
+            let childPriority: ScanPriority = task.priority == .high ? .medium : .low
+            for child in childrenWithMetadata where child.isDirectory {
+                if case .current = child.scanStatus {
+                    continue
+                }
+                enqueue(path: child.path, priority: childPriority)
+            }
+        } else {
+            enqueue(path: task.path, priority: .high)
+        }
+
+        inFlight.remove(task.path)
+        debugLog("ScanQueue: completed \(task.path.path), found \(childrenWithMetadata.count) children, total scanned: \(totalFilesScanned)", category: "QUEUE")
+        updateQueueCount()
+        if inFlight.isEmpty && tasks.isEmpty {
+            await sendUpdate(.scanLoopEnded(completedExclusiveFocus))
+        }
+    }
+
     private func popNextTask() -> ScanTask? {
+        if tasks.isEmpty {
+            drainDeferredTasksIfNeeded()
+        }
         guard !tasks.isEmpty else { return nil }
         if let focusRoot {
             let focusIndices = tasks.enumerated().filter { pathHasPrefix($0.element.path, prefix: focusRoot) }
@@ -358,6 +397,41 @@ actor ScanQueueWorker {
         return tasks.removeFirst()
     }
 
+    private func enqueueTask(_ task: ScanTask) {
+        if task.priority == .high || !shouldDeferEnqueue {
+            insertTask(task)
+            return
+        }
+        deferredTasks.append(task)
+    }
+
+    private func insertTask(_ task: ScanTask) {
+        if let insertIndex = tasks.firstIndex(where: { $0.priority > task.priority || ($0.priority == task.priority && $0.depth > task.depth) }) {
+            tasks.insert(task, at: insertIndex)
+        } else {
+            tasks.append(task)
+        }
+    }
+
+    private func drainDeferredTasksIfNeeded() {
+        guard !deferredTasks.isEmpty else { return }
+        guard tasks.count < maxQueuedTasks || inFlight.count < maxConcurrentScans else { return }
+        while !deferredTasks.isEmpty && tasks.count < maxQueuedTasks {
+            let task = deferredTasks.removeFirst()
+            if !scannedPaths.contains(task.path) && !tasks.contains(where: { $0.path == task.path }) {
+                insertTask(task)
+            }
+        }
+    }
+
+    private var shouldDeferEnqueue: Bool {
+        inFlight.count >= maxConcurrentScans && tasks.count >= maxQueuedTasks
+    }
+
+    private func containsTask(path: URL) -> Bool {
+        tasks.contains(where: { $0.path == path }) || deferredTasks.contains(where: { $0.path == path })
+    }
+
     private func queueChildrenIfNeeded(of path: URL, priority: ScanPriority) {
         debugLog("ScanQueue: path already scanned, checking children", category: "QUEUE")
     }
@@ -370,7 +444,7 @@ actor ScanQueueWorker {
         let now = Date()
         guard now.timeIntervalSince(lastQueueCountUpdate) >= 0.5 else { return }
         lastQueueCountUpdate = now
-        Task { await sendUpdate(.queuedCount(tasks.count)) }
+        Task { await sendUpdate(.queuedCount(tasks.count + deferredTasks.count)) }
     }
 
     private func updateProgressThrottled(path: String, force: Bool = false) {
@@ -405,25 +479,5 @@ actor ScanQueueWorker {
 
     private func pathHasPrefix(_ path: URL, prefix: URL) -> Bool {
         path.path.hasPrefix(prefix.path)
-    }
-}
-
-actor SwiftScanWorker {
-    private let scanner = SwiftScanner()
-
-    func scanDirectory(at path: URL, startingAt offset: Int) async -> ScanDirectoryResult {
-        await scanner.scanDirectory(at: path, startingAt: offset)
-    }
-
-    func setProgressHandler(_ handler: @escaping @Sendable (Int, Int64) async -> Void) async {
-        scanner.setProgressCallback { _, filesScanned, bytesScanned in
-            Task {
-                await handler(filesScanned, bytesScanned)
-            }
-        }
-    }
-
-    func clearProgressHandler() async {
-        scanner.clearProgressCallback()
     }
 }
