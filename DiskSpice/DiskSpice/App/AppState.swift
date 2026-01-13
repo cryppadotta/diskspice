@@ -65,6 +65,9 @@ class AppState {
     private var fileTree: [URL: [FileNode]] = [:]
     private var sortedCache: (key: SortedNodesKey, nodes: [FileNode])?
     private var cacheSaveTasks: [String: Task<Void, Never>] = [:]
+    private var pendingDirectoryUpdates: [URL: PendingDirectoryUpdate] = [:]
+    private var coalesceTask: Task<Void, Never>?
+    private let coalesceInterval: TimeInterval = 0.15
 
     init() {
         // Default to root
@@ -73,13 +76,7 @@ class AppState {
         // Set up scan queue callback
         scanQueue.onDirectoryScanned = { [weak self] path, children, isComplete in
             Task { @MainActor in
-                let merged = self?.mergeChildren(existing: self?.fileTree[path] ?? [], newChildren: children) ?? children
-                self?.fileTree[path] = merged
-                self?.updateParentNode(for: path, children: merged, isComplete: isComplete)
-                debugLog("ScanQueue completed: \(path.path) with \(children.count) children", category: "SCAN")
-                if isComplete {
-                    self?.scheduleCacheSave(for: path)
-                }
+                self?.enqueueDirectoryUpdate(path: path, children: children, isComplete: isComplete)
             }
         }
         scanQueue.onDirectoryProgress = { [weak self] path, filesScanned, bytesScanned in
@@ -378,6 +375,7 @@ private extension AppState {
         fileTree[parentPath] = existingChildren
         if parentPath == navigationState.currentPath {
             sortedCache = nil
+            refreshSelectionIfNeeded(for: parentPath)
         }
     }
 
@@ -395,7 +393,55 @@ private extension AppState {
         fileTree[parentPath] = existingChildren
         if parentPath == navigationState.currentPath {
             sortedCache = nil
+            refreshSelectionIfNeeded(for: parentPath)
         }
+    }
+
+    func enqueueDirectoryUpdate(path: URL, children: [FileNode], isComplete: Bool) {
+        let existing = pendingDirectoryUpdates[path]?.children ?? fileTree[path] ?? []
+        let merged = mergeChildren(existing: existing, newChildren: children)
+        let wasComplete = pendingDirectoryUpdates[path]?.isComplete ?? false
+        pendingDirectoryUpdates[path] = PendingDirectoryUpdate(children: merged, isComplete: wasComplete || isComplete)
+        scheduleCoalescedFlush()
+    }
+
+    func scheduleCoalescedFlush() {
+        guard coalesceTask == nil else { return }
+        coalesceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: .milliseconds(Int(self.coalesceInterval * 1000)))
+            self.flushPendingDirectoryUpdates()
+        }
+    }
+
+    func flushPendingDirectoryUpdates() {
+        guard !pendingDirectoryUpdates.isEmpty else {
+            coalesceTask = nil
+            return
+        }
+        let updates = pendingDirectoryUpdates
+        pendingDirectoryUpdates.removeAll()
+        coalesceTask = nil
+
+        for (path, update) in updates {
+            fileTree[path] = update.children
+            updateParentNode(for: path, children: update.children, isComplete: update.isComplete)
+            if path == navigationState.currentPath {
+                sortedCache = nil
+                refreshSelectionIfNeeded(for: path)
+            }
+            debugLog("ScanQueue completed: \(path.path) with \(update.children.count) children", category: "SCAN")
+            if update.isComplete {
+                scheduleCacheSave(for: path)
+            }
+        }
+    }
+
+    func refreshSelectionIfNeeded(for path: URL) {
+        guard path == navigationState.currentPath else { return }
+        guard let selectedNode else { return }
+        guard let updatedNode = fileTree[path]?.first(where: { $0.path == selectedNode.path }) else { return }
+        self.selectedNode = updatedNode
     }
 }
 
@@ -417,4 +463,9 @@ private func nodesSignature(_ nodes: [FileNode]) -> Int {
         hasher.combine(node.modifiedDate?.timeIntervalSince1970 ?? 0)
     }
     return hasher.finalize()
+}
+
+private struct PendingDirectoryUpdate {
+    let children: [FileNode]
+    let isComplete: Bool
 }
