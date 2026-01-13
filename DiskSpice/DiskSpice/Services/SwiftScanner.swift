@@ -90,6 +90,7 @@ class SwiftScanner {
 
     private let resourceKeys: [URLResourceKey] = [
         .fileSizeKey,
+        .fileAllocatedSizeKey,
         .totalFileSizeKey,
         .isDirectoryKey,
         .isSymbolicLinkKey,
@@ -173,7 +174,7 @@ class SwiftScanner {
             if isSymlink {
                 // For symlinks, get the target but don't follow for size
                 node.symlinkTarget = try? fileManager.destinationOfSymbolicLink(atPath: url.path)
-                node.size = Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileSize ?? 0)
+                node.size = metadataEstimatedSize(from: resourceValues) ?? 0
                 node.itemCount = 0
             } else if isDirectory {
                 // Check if this is a "heavy" directory that should use fast sizing
@@ -188,16 +189,19 @@ class SwiftScanner {
                         node.size = 0
                     }
                     node.itemCount = countDirectoryItems(url)
+                } else if let estimate = metadataEstimatedSize(from: resourceValues) {
+                    // Regular directory - metadata-based estimate (non-recursive, fast)
+                    node.size = estimate
+                    node.itemCount = 0
                 } else {
                     let estimate = sampleDirectoryEstimate(url)
-                    // Regular directory - quick count of immediate children only
+                    // Fallback estimate based on quick sampling (not recursive)
                     node.itemCount = estimate.itemCount
-                    // Estimate size based on metadata or sampling (not recursive)
                     node.size = estimate.size
                 }
             } else {
                 // File size
-                node.size = Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.totalFileSize ?? resourceValues.fileSize ?? 0)
+                node.size = metadataEstimatedSize(from: resourceValues) ?? 0
                 node.itemCount = 0
             }
 
@@ -224,7 +228,7 @@ class SwiftScanner {
 
         guard let enumerator = fileManager.enumerator(
             at: url,
-            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey],
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey],
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants],
             errorHandler: { _, _ in true }
         ) else {
@@ -238,8 +242,8 @@ class SwiftScanner {
                 break
             }
 
-            if let values = try? childURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey]) {
-                let allocated = values.totalFileAllocatedSize ?? values.fileSize ?? 0
+            if let values = try? childURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey]) {
+                let allocated = values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? values.fileSize ?? 0
                 size += Int64(allocated)
             }
         }
@@ -251,6 +255,16 @@ class SwiftScanner {
         let estimatedCount = count * 4
         let average = count > 0 ? (size / Int64(count)) : 0
         return (average * Int64(estimatedCount), estimatedCount)
+    }
+
+    private func metadataEstimatedSize(from values: URLResourceValues) -> Int64? {
+        let size = values.totalFileAllocatedSize
+            ?? values.totalFileSize
+            ?? values.fileAllocatedSize
+            ?? values.fileSize
+            ?? 0
+        guard size > 0 else { return nil }
+        return Int64(size)
     }
 
     /// Calculate total size of a directory recursively

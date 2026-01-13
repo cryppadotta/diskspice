@@ -316,12 +316,14 @@ private extension AppState {
                 return existingNode
             }
 
-            if child.isDirectory && !newIsCurrent && (existingNode.size > 0 || existingNode.itemCount > 0) {
+            if child.isDirectory && !newIsCurrent {
                 var merged = child
-                merged.size = existingNode.size
-                merged.itemCount = existingNode.itemCount
-                merged.scanStatus = existingNode.scanStatus
-                merged.lastScanned = existingNode.lastScanned
+                if existingNode.size > 0 || existingNode.itemCount > 0 {
+                    merged.size = max(existingNode.size, child.size)
+                    merged.itemCount = max(existingNode.itemCount, child.itemCount)
+                    merged.scanStatus = existingNode.scanStatus
+                    merged.lastScanned = existingNode.lastScanned
+                }
                 return merged
             }
 
