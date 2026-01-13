@@ -32,6 +32,8 @@ class SwiftScanner {
     private var bytesScanned: Int64 = 0
     private let scanTimeBudget: TimeInterval = 0.05
     private let maxEntriesPerPass: Int = 200
+    private let sampleTimeBudget: TimeInterval = 0.02
+    private let sampleEntryLimit: Int = 32
 
     /// Set progress callback for scan updates
     func setProgressCallback(_ callback: @escaping ScanProgressCallback) {
@@ -187,11 +189,11 @@ class SwiftScanner {
                     }
                     node.itemCount = countDirectoryItems(url)
                 } else {
+                    let estimate = sampleDirectoryEstimate(url)
                     // Regular directory - quick count of immediate children only
-                    let childCount = (try? fileManager.contentsOfDirectory(atPath: url.path).count) ?? 0
-                    node.itemCount = childCount
-                    // Estimate size based on allocated size (not recursive)
-                    node.size = Int64(resourceValues.totalFileAllocatedSize ?? 0)
+                    node.itemCount = estimate.itemCount
+                    // Estimate size based on metadata or sampling (not recursive)
+                    node.size = estimate.size
                 }
             } else {
                 // File size
@@ -212,6 +214,43 @@ class SwiftScanner {
             node.scanStatus = .error(error.localizedDescription)
             return node
         }
+    }
+
+    private func sampleDirectoryEstimate(_ url: URL) -> (size: Int64, itemCount: Int) {
+        let start = Date()
+        var count = 0
+        var size: Int64 = 0
+        var reachedEnd = true
+
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants],
+            errorHandler: { _, _ in true }
+        ) else {
+            return (Int64(0), 0)
+        }
+
+        for case let childURL as URL in enumerator {
+            count += 1
+            if count > sampleEntryLimit || Date().timeIntervalSince(start) > sampleTimeBudget {
+                reachedEnd = false
+                break
+            }
+
+            if let values = try? childURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey]) {
+                let allocated = values.totalFileAllocatedSize ?? values.fileSize ?? 0
+                size += Int64(allocated)
+            }
+        }
+
+        if reachedEnd {
+            return (size, count)
+        }
+
+        let estimatedCount = count * 4
+        let average = count > 0 ? (size / Int64(count)) : 0
+        return (average * Int64(estimatedCount), estimatedCount)
     }
 
     /// Calculate total size of a directory recursively
