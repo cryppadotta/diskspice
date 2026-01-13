@@ -108,9 +108,9 @@ struct ErrorBadge: View {
 
     private func formatErrorMessage(_ message: String) -> String {
         if message.contains("Permission denied") || message.contains("Operation not permitted") {
-            return "Permission denied. Click to retry after granting access."
+            return "Permission denied: \(message). Click to retry after granting access."
         } else if message.contains("No such file") || message.contains("not found") {
-            return "File or folder not found."
+            return "File or folder not found: \(message). Click to retry."
         } else {
             return "Error: \(message). Click to retry."
         }

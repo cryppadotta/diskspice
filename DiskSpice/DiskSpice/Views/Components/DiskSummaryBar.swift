@@ -22,7 +22,7 @@ struct DiskSummaryBar: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    if appState.isScanning {
+                    if appState.isScanningVolumeUsage {
                         ProgressView()
                             .scaleEffect(0.7)
                             .frame(width: 14, height: 14)
@@ -36,7 +36,7 @@ struct DiskSummaryBar: View {
             UsageProgressBar(
                 used: appState.totalUsedSpace,
                 total: appState.totalSpace,
-                isScanning: appState.isScanning
+                isScanning: appState.isScanningVolumeUsage
             )
             .frame(width: 200, height: 8)
 
@@ -209,6 +209,8 @@ struct FreeSpaceBadge: View {
 
 struct ScanProgressBar: View {
     let progress: ScanProgress
+    let basePath: URL
+    let fullPath: String
 
     @State private var animationPhase: CGFloat = 0
 
@@ -223,11 +225,12 @@ struct ScanProgressBar: View {
             // Progress info
             VStack(alignment: .leading, spacing: 2) {
                 // Current file being scanned (truncated)
-                Text(truncatedPath(progress.currentPath))
+                Text(truncatedPath(fullPath))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(fullPath)
 
                 // Stats row
                 HStack(spacing: 16) {
@@ -289,15 +292,27 @@ struct ScanProgressBar: View {
     }
 
     private func truncatedPath(_ path: String) -> String {
-        // Show just the filename or last path component
         let url = URL(fileURLWithPath: path)
-        let filename = url.lastPathComponent
-        let parent = url.deletingLastPathComponent().lastPathComponent
+        let baseComponents = basePath.pathComponents.filter { $0 != "/" }
+        let fullComponents = url.pathComponents.filter { $0 != "/" }
+        let relativeComponents: [String]
 
-        if parent.isEmpty || parent == "/" {
-            return filename
+        if fullComponents.starts(with: baseComponents) {
+            relativeComponents = Array(fullComponents.dropFirst(baseComponents.count))
+        } else {
+            relativeComponents = fullComponents
         }
-        return "\(parent)/\(filename)"
+
+        let components = relativeComponents
+        if components.isEmpty {
+            return "./"
+        }
+        if components.count <= 4 {
+            return "./" + components.joined(separator: "/")
+        }
+        let prefix = components.prefix(2).joined(separator: "/")
+        let suffix = components.suffix(2).joined(separator: "/")
+        return "./\(prefix)/.../\(suffix)"
     }
 
     private func formatBytes(_ bytes: Int64) -> String {
@@ -318,7 +333,7 @@ struct ScanCompletedBar: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color.green)
 
-            Text("Completed")
+            Text("Done")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.primary)
 
@@ -348,34 +363,85 @@ struct ScanCompletedBar: View {
     }
 }
 
+struct ScanIdleBar: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.secondary)
+
+            Text("Ready")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .controlBackgroundColor).opacity(0.9),
+                        Color(nsColor: .controlBackgroundColor).opacity(0.6)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+
+                VStack {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(height: 2)
+                    Spacer()
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Scan Progress Wrapper (Isolates observation)
 
 struct ScanProgressWrapper: View {
     let scanQueue: ScanQueue
+    let basePath: URL
+    @State private var lastFullPath: String = ""
 
     var body: some View {
-        if scanQueue.isScanning, let progress = scanQueue.progress {
-            ScanProgressBar(progress: progress)
-                .transition(.move(edge: .top).combined(with: .opacity))
-        } else if scanQueue.isCompleted {
-            ScanCompletedBar()
-                .transition(.move(edge: .top).combined(with: .opacity))
+        Group {
+            if scanQueue.isScanning, let progress = scanQueue.progress {
+                let currentPath = progress.currentPath.isEmpty ? lastFullPath : progress.currentPath
+                ScanProgressBar(progress: progress, basePath: basePath, fullPath: currentPath)
+                    .onChange(of: progress.currentPath) { _, newValue in
+                        if !newValue.isEmpty {
+                            lastFullPath = newValue
+                        }
+                    }
+            } else if scanQueue.isCompleted {
+                ScanCompletedBar()
+            } else {
+                ScanIdleBar()
+            }
         }
     }
 }
 
 #Preview("Disk Summary") {
     let state = AppState()
-    return DiskSummaryBar(appState: state)
+    DiskSummaryBar(appState: state)
         .frame(width: 800)
 }
 
 #Preview("Scan Progress") {
-    ScanProgressBar(progress: ScanProgress(
-        currentPath: "/Users/john/Documents/very-long-filename.txt",
-        filesScanned: 1234,
-        bytesScanned: 1_234_567_890,
-        startTime: Date().addingTimeInterval(-15)
-    ))
+    ScanProgressBar(
+        progress: ScanProgress(
+            currentPath: "/Users/john/Documents/very-long-filename.txt",
+            filesScanned: 1234,
+            bytesScanned: 1_234_567_890,
+            startTime: Date().addingTimeInterval(-15)
+        ),
+        basePath: URL(fileURLWithPath: "/Users/john/Documents"),
+        fullPath: "/Users/john/Documents/very-long-filename.txt"
+    )
     .frame(width: 800)
 }
