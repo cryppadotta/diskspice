@@ -16,6 +16,12 @@ private let heavyDirectoryNames: Set<String> = [
     "bower_components"
 ]
 
+struct ScanDirectoryResult {
+    let nodes: [FileNode]
+    let isComplete: Bool
+    let nextOffset: Int
+}
+
 /// Simple Swift-based directory scanner for immediate children
 /// Used for quick directory listing without the full Rust scanner
 class SwiftScanner {
@@ -24,6 +30,8 @@ class SwiftScanner {
     private var progressCallback: ScanProgressCallback?
     private var filesScanned: Int = 0
     private var bytesScanned: Int64 = 0
+    private let scanTimeBudget: TimeInterval = 0.05
+    private let maxEntriesPerPass: Int = 200
 
     /// Set progress callback for scan updates
     func setProgressCallback(_ callback: @escaping ScanProgressCallback) {
@@ -88,32 +96,54 @@ class SwiftScanner {
     ]
 
     /// Scan immediate children of a directory
-    func scanDirectory(at path: URL) async -> [FileNode] {
+    func scanDirectory(at path: URL, startingAt offset: Int) async -> ScanDirectoryResult {
         // Reset counters for new scan
         filesScanned = 0
         bytesScanned = 0
 
         do {
-            let contents = try fileManager.contentsOfDirectory(
+            let start = Date()
+            var nodes: [FileNode] = []
+            var entriesScanned = 0
+            var processed = 0
+            var didHitBudget = false
+            var reachedEnd = true
+
+            guard let enumerator = fileManager.enumerator(
                 at: path,
                 includingPropertiesForKeys: resourceKeys,
-                options: [.skipsHiddenFiles]
-            )
+                options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants],
+                errorHandler: { _, _ in true }
+            ) else {
+                return ScanDirectoryResult(nodes: [], isComplete: true, nextOffset: offset)
+            }
 
-            var nodes: [FileNode] = []
+            for case let url as URL in enumerator {
+                entriesScanned += 1
+                if entriesScanned <= offset {
+                    continue
+                }
 
-            for url in contents {
+                if processed >= maxEntriesPerPass || Date().timeIntervalSince(start) > scanTimeBudget {
+                    didHitBudget = true
+                    reachedEnd = false
+                    break
+                }
+
                 if let node = await scanItem(at: url) {
                     nodes.append(node)
                     reportProgress(path: url.path, size: node.size)
                 }
+                processed += 1
             }
 
-            return nodes.sorted { $0.size > $1.size }
+            let sorted = nodes.sorted { $0.size > $1.size }
+            let nextOffset = offset + processed
+            return ScanDirectoryResult(nodes: sorted, isComplete: !didHitBudget && reachedEnd, nextOffset: nextOffset)
 
         } catch {
             debugLog("SwiftScanner error scanning \(path.path): \(error)", category: "SCAN")
-            return []
+            return ScanDirectoryResult(nodes: [], isComplete: true, nextOffset: offset)
         }
     }
 

@@ -37,7 +37,7 @@ class ScanQueue {
     @ObservationIgnored private let worker = ScanQueueWorker()
 
     // Callback when directory scan completes
-    var onDirectoryScanned: ((URL, [FileNode]) -> Void)?
+    var onDirectoryScanned: ((URL, [FileNode], Bool) -> Void)?
     var onDirectoryProgress: ((URL, Int, Int64) -> Void)?
 
     init() {
@@ -112,9 +112,11 @@ class ScanQueue {
             queuedCount = count
         case .progress(let progress):
             self.progress = progress
-        case .directoryScanned(let path, let children):
-            knownScannedPaths.insert(path)
-            onDirectoryScanned?(path, children)
+        case .directoryScanned(let path, let children, let isComplete):
+            if isComplete {
+                knownScannedPaths.insert(path)
+            }
+            onDirectoryScanned?(path, children, isComplete)
         case .directoryProgress(let path, let filesScanned, let bytesScanned):
             onDirectoryProgress?(path, filesScanned, bytesScanned)
         case .scanLoopEnded(let completed):
@@ -137,7 +139,7 @@ enum ScanQueueUpdate: Sendable {
     case currentTask(ScanTask?)
     case queuedCount(Int)
     case progress(ScanProgress)
-    case directoryScanned(URL, [FileNode])
+    case directoryScanned(URL, [FileNode], Bool)
     case directoryProgress(URL, Int, Int64)
     case scanLoopEnded(Bool)
 }
@@ -154,6 +156,7 @@ actor ScanQueueWorker {
     private var focusRoot: URL?
     private var completedExclusiveFocus = false
     private let exclusiveFocusMode = true
+    private var partialOffsets: [URL: Int] = [:]
 
     // Cumulative stats across all scans
     private var totalFilesScanned: Int = 0
@@ -292,8 +295,9 @@ actor ScanQueueWorker {
             }
 
             let scannedAt = Date()
-            let children = await scanWorker.scanDirectory(at: task.path)
-            let childrenWithMetadata = children.map { child -> FileNode in
+            let offset = partialOffsets[task.path] ?? 0
+            let result = await scanWorker.scanDirectory(at: task.path, startingAt: offset)
+            let childrenWithMetadata = result.nodes.map { child -> FileNode in
                 var node = child
                 if node.lastScanned == nil {
                     node.lastScanned = scannedAt
@@ -308,18 +312,27 @@ actor ScanQueueWorker {
             }
 
             updateProgressThrottled(path: task.path.path, force: true)
-            scannedPaths.insert(task.path)
-            await sendUpdate(.directoryScanned(task.path, childrenWithMetadata))
+            if result.isComplete {
+                scannedPaths.insert(task.path)
+                partialOffsets.removeValue(forKey: task.path)
+            } else {
+                partialOffsets[task.path] = result.nextOffset
+            }
+            await sendUpdate(.directoryScanned(task.path, childrenWithMetadata, result.isComplete))
 
-            let childPriority: ScanPriority = task.priority == .high ? .medium : .low
-            for child in childrenWithMetadata where child.isDirectory {
-                if case .current = child.scanStatus {
-                    continue
+            if result.isComplete {
+                let childPriority: ScanPriority = task.priority == .high ? .medium : .low
+                for child in childrenWithMetadata where child.isDirectory {
+                    if case .current = child.scanStatus {
+                        continue
+                    }
+                    enqueue(path: child.path, priority: childPriority)
                 }
-                enqueue(path: child.path, priority: childPriority)
+            } else {
+                enqueue(path: task.path, priority: .high)
             }
 
-            debugLog("ScanQueue: completed \(task.path.path), found \(children.count) children, total scanned: \(totalFilesScanned)", category: "QUEUE")
+            debugLog("ScanQueue: completed \(task.path.path), found \(childrenWithMetadata.count) children, total scanned: \(totalFilesScanned)", category: "QUEUE")
             updateQueueCount()
         }
 
@@ -397,8 +410,8 @@ actor ScanQueueWorker {
 actor SwiftScanWorker {
     private let scanner = SwiftScanner()
 
-    func scanDirectory(at path: URL) async -> [FileNode] {
-        await scanner.scanDirectory(at: path)
+    func scanDirectory(at path: URL, startingAt offset: Int) async -> ScanDirectoryResult {
+        await scanner.scanDirectory(at: path, startingAt: offset)
     }
 
     func setProgressHandler(_ handler: @escaping @Sendable (Int, Int64) async -> Void) async {

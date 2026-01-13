@@ -71,13 +71,15 @@ class AppState {
         self.navigationState = NavigationState(currentPath: URL(fileURLWithPath: "/"))
 
         // Set up scan queue callback
-        scanQueue.onDirectoryScanned = { [weak self] path, children in
+        scanQueue.onDirectoryScanned = { [weak self] path, children, isComplete in
             Task { @MainActor in
                 let merged = self?.mergeChildren(existing: self?.fileTree[path] ?? [], newChildren: children) ?? children
                 self?.fileTree[path] = merged
-                self?.updateParentNode(for: path, children: merged)
+                self?.updateParentNode(for: path, children: merged, isComplete: isComplete)
                 debugLog("ScanQueue completed: \(path.path) with \(children.count) children", category: "SCAN")
-                self?.scheduleCacheSave(for: path)
+                if isComplete {
+                    self?.scheduleCacheSave(for: path)
+                }
             }
         }
         scanQueue.onDirectoryProgress = { [weak self] path, filesScanned, bytesScanned in
@@ -361,7 +363,7 @@ private extension AppState {
         volumes.first { path.path.hasPrefix($0.path.path) }
     }
 
-    func updateParentNode(for path: URL, children: [FileNode]) {
+    func updateParentNode(for path: URL, children: [FileNode], isComplete: Bool = true) {
         let parentPath = path.deletingLastPathComponent()
         var existingChildren = fileTree[parentPath] ?? []
         guard let index = existingChildren.firstIndex(where: { $0.path == path }) else { return }
@@ -369,8 +371,8 @@ private extension AppState {
         var node = existingChildren[index]
         node.size = children.reduce(0) { $0 + $1.effectiveSize }
         node.itemCount = children.count
-        node.scanStatus = .current
-        node.lastScanned = Date()
+        node.scanStatus = isComplete ? .current : .scanning
+        node.lastScanned = isComplete ? Date() : node.lastScanned
         existingChildren[index] = node
 
         fileTree[parentPath] = existingChildren
