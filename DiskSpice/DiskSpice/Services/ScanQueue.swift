@@ -153,6 +153,7 @@ actor ScanQueueWorker {
     private var tasks: [ScanTask] = []
     private var deferredTasks: [ScanTask] = []
     private var scannedPaths: Set<URL> = []
+    private var partialResults: [URL: [FileNode]] = [:]
     private var focusRoot: URL?
     private var completedExclusiveFocus = false
     private let exclusiveFocusMode = true
@@ -195,6 +196,7 @@ actor ScanQueueWorker {
         tasks.removeAll()
         deferredTasks.removeAll()
         scannedPaths.removeAll()
+        partialResults.removeAll()
         inFlight.removeAll()
         Task { await sendUpdate(.queuedCount(0)) }
     }
@@ -210,6 +212,7 @@ actor ScanQueueWorker {
 
         if force {
             scannedPaths = scannedPaths.filter { !pathHasPrefix($0, prefix: path) }
+            partialResults = partialResults.filter { !pathHasPrefix($0.key, prefix: path) }
         }
 
         focusRoot = path
@@ -257,6 +260,7 @@ actor ScanQueueWorker {
 
     func markScanned(path: URL) {
         scannedPaths.insert(path)
+        partialResults.removeValue(forKey: path)
         tasks.removeAll { $0.path == path }
         deferredTasks.removeAll { $0.path == path }
         updateQueueCount()
@@ -283,6 +287,7 @@ actor ScanQueueWorker {
             if inFlight.isEmpty && tasks.isEmpty {
                 if completedExclusiveFocus {
                     await sendUpdate(.scanLoopEnded(true))
+                    scanTask = nil
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(100))
@@ -293,6 +298,7 @@ actor ScanQueueWorker {
 
         debugLog("ScanQueue: scan loop ended", category: "QUEUE")
         await sendUpdate(.scanLoopEnded(false))
+        scanTask = nil
     }
 
     private func startScanTask(_ task: ScanTask) {
@@ -315,8 +321,14 @@ actor ScanQueueWorker {
         partialOffsets[path] ?? 0
     }
 
-    nonisolated private func performScan(task: ScanTask, offset: Int) async -> ScanDirectoryResult {
+    private func performScan(task: ScanTask, offset: Int) async -> ScanDirectoryResult {
         let scanner = SwiftScanner()
+        let forceFullPass = task.path == focusRoot
+        let effectiveOffset = forceFullPass ? 0 : offset
+        debugLog(
+            "ScanQueue: scan start path=\(task.path.path) offset=\(effectiveOffset) focused=\(forceFullPass)",
+            category: "SCAN"
+        )
         scanner.setProgressCallback { _, filesScanned, bytesScanned in
             Task { [weak self] in
                 await self?.updateDirectoryProgressThrottled(
@@ -326,8 +338,16 @@ actor ScanQueueWorker {
                 )
             }
         }
-        let result = await scanner.scanDirectory(at: task.path, startingAt: offset)
+        let result = await scanner.scanDirectory(
+            at: task.path,
+            startingAt: effectiveOffset,
+            forceFullPass: forceFullPass
+        )
         scanner.clearProgressCallback()
+        debugLog(
+            "ScanQueue: scan end path=\(task.path.path) children=\(result.nodes.count) complete=\(result.isComplete) nextOffset=\(result.nextOffset)",
+            category: "SCAN"
+        )
         return result
     }
 
@@ -354,7 +374,15 @@ actor ScanQueueWorker {
             partialOffsets[task.path] = result.nextOffset
         }
 
-        await sendUpdate(.directoryScanned(task.path, childrenWithMetadata, result.isComplete))
+        let accumulated = partialResults[task.path] ?? []
+        let merged = mergeChildren(existing: accumulated, newChildren: childrenWithMetadata)
+        if result.isComplete {
+            partialResults.removeValue(forKey: task.path)
+        } else {
+            partialResults[task.path] = merged
+        }
+
+        await sendUpdate(.directoryScanned(task.path, merged, result.isComplete))
 
         if result.isComplete {
             let childPriority: ScanPriority = task.priority == .high ? .medium : .low
@@ -395,6 +423,26 @@ actor ScanQueueWorker {
             self.focusRoot = nil
         }
         return tasks.removeFirst()
+    }
+
+    private func mergeChildren(existing: [FileNode], newChildren: [FileNode]) -> [FileNode] {
+        guard !existing.isEmpty else { return newChildren }
+        var byPath: [URL: FileNode] = [:]
+        var order: [URL] = []
+
+        for node in existing {
+            byPath[node.path] = node
+            order.append(node.path)
+        }
+
+        for node in newChildren {
+            if byPath[node.path] == nil {
+                order.append(node.path)
+            }
+            byPath[node.path] = node
+        }
+
+        return order.compactMap { byPath[$0] }
     }
 
     private func enqueueTask(_ task: ScanTask) {

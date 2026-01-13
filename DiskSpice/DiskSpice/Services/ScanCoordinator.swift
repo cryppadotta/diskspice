@@ -7,6 +7,7 @@ class ScanCoordinator: ScannerDelegate {
 
     private var pendingUpdates: [URL: PendingUpdates] = [:]
     private var updateDebounceTask: Task<Void, Never>?
+    private var focusedScanPath: URL?
 
     init(scanner: any Scanner, appState: AppState) {
         self.scanner = scanner
@@ -21,6 +22,18 @@ class ScanCoordinator: ScannerDelegate {
     func startScan(at path: URL) async {
         appState.isScanning = true
         appState.clearTree()
+        await scanner.startScan(at: path)
+    }
+
+    func startFocusedScan(at path: URL) async {
+        if scanner.isScanning {
+            if focusedScanPath == path {
+                return
+            }
+            scanner.cancelScan()
+        }
+        focusedScanPath = path
+        appState.isScanning = true
         await scanner.startScan(at: path)
     }
 
@@ -130,12 +143,13 @@ class ScanCoordinator: ScannerDelegate {
         }
         appState.updateChildren(at: path, children: children)
 
-        print("Scan error at \(path.path): \(error.localizedDescription)")
+        debugError("Scan error at \(path.path)", error: error)
     }
 
     private func handleScanComplete() {
         flushPendingUpdates()
         appState.isScanning = false
+        focusedScanPath = nil
     }
 }
 
