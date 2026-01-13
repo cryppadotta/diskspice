@@ -5,6 +5,13 @@ struct FileListView: View {
     @Bindable var appState: AppState
     let nodes: [FileNode]
 
+    @State private var frozenNodes: [FileNode] = []
+    @State private var isListHovering = false
+    @State private var freezeSorting = false
+    @State private var moveToken = 0
+
+    private let freezeInterval: TimeInterval = 0.7
+
     private var parentTotalSize: Int64 {
         // Exclude symlinks from total to avoid double-counting
         nodes.reduce(0) { $0 + $1.effectiveSize }
@@ -14,51 +21,201 @@ struct FileListView: View {
         appState.sortedNodes(for: appState.navigationState.currentPath, nodes: nodes)
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            FileListHeader(
-                sortField: appState.sortField,
-                sortOrder: appState.sortOrder,
-                onSort: { field in appState.toggleSort(for: field) }
-            )
+    private var shouldFreezeSorting: Bool {
+        isListHovering && freezeSorting
+    }
 
-            // List with auto-scroll
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(sortedNodes) { node in
-                            FileListRow(
-                                node: node,
-                                parentTotalSize: parentTotalSize,
-                                isSelected: appState.selectedNode?.id == node.id,
-                                isActivelyScanning: appState.isCurrentlyScanning(path: node.path),
-                                onSelect: {
-                                    if node.isDirectory {
-                                        appState.navigateTo(node.path)
-                                    } else {
-                                        appState.selectNode(node)
+    private var displayNodes: [FileNode] {
+        if shouldFreezeSorting {
+            return mergeFrozenOrder(frozenNodes, with: nodes)
+        }
+        return sortedNodes
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let headerHeight: CGFloat = 30
+            VStack(spacing: 0) {
+                // Header
+                FileListHeader(
+                    sortField: appState.sortField,
+                    sortOrder: appState.sortOrder,
+                    onSort: { field in appState.toggleSort(for: field) }
+                )
+                .frame(height: headerHeight, alignment: .center)
+
+                // List with auto-scroll
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(displayNodes) { node in
+                                FileListRow(
+                                    node: node,
+                                    parentTotalSize: parentTotalSize,
+                                    isSelected: appState.selectedNode?.id == node.id,
+                                    isActivelyScanning: appState.isCurrentlyScanning(path: node.path),
+                                    onSelect: {
+                                        if node.isDirectory {
+                                            appState.navigateTo(node.path)
+                                        } else {
+                                            appState.selectNode(node)
+                                        }
+                                    },
+                                    onDelete: {
+                                        appState.deleteNode(node)
                                     }
-                                },
-                                onDelete: {
-                                    appState.deleteNode(node)
-                                }
-                            )
-                            .id(node.id)
+                                )
+                                .id(node.id)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
-                }
-                .onChange(of: appState.selectedNode?.id) { _, newId in
-                    // Scroll to selected item when selection changes (e.g., from treemap)
-                    if let id = newId {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .center)
+                    .frame(height: max(0, geometry.size.height - headerHeight), alignment: .top)
+                    .background(
+                        MouseTrackingView(
+                            onMove: { handleMouseMove() },
+                            onHoverChange: { hovering in
+                                isListHovering = hovering
+                                if !hovering {
+                                    freezeSorting = false
+                                }
+                            }
+                        )
+                    )
+                    .onChange(of: appState.selectedNode?.id) { _, newId in
+                        // Scroll to selected item when selection changes (e.g., from treemap)
+                        if let id = newId {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
                         }
                     }
                 }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear {
+            frozenNodes = sortedNodes
+        }
+        .onChange(of: nodes) { _, _ in
+            if !shouldFreezeSorting {
+                frozenNodes = sortedNodes
+            }
+        }
+        .onChange(of: appState.sortField) { _, _ in
+            if !shouldFreezeSorting {
+                frozenNodes = sortedNodes
+            }
+        }
+        .onChange(of: appState.sortOrder) { _, _ in
+            if !shouldFreezeSorting {
+                frozenNodes = sortedNodes
+            }
+        }
+        .onChange(of: appState.navigationState.currentPath) { _, _ in
+            freezeSorting = false
+            frozenNodes = sortedNodes
+        }
+        .onChange(of: freezeSorting) { _, newValue in
+            if !newValue {
+                frozenNodes = sortedNodes
+            }
+        }
+    }
+
+    private func handleMouseMove() {
+        moveToken += 1
+        let token = moveToken
+        freezeSorting = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + freezeInterval) {
+            if moveToken == token {
+                freezeSorting = false
+            }
+        }
+    }
+
+    private func mergeFrozenOrder(_ frozen: [FileNode], with current: [FileNode]) -> [FileNode] {
+        guard !frozen.isEmpty else { return current }
+        var byPath: [URL: FileNode] = [:]
+        for node in current {
+            byPath[node.path] = node
+        }
+
+        var merged: [FileNode] = []
+        var seen: Set<URL> = []
+
+        for node in frozen {
+            if let updated = byPath[node.path] {
+                merged.append(updated)
+            } else {
+                merged.append(node)
+            }
+            seen.insert(node.path)
+        }
+
+        let newNodes = current.filter { !seen.contains($0.path) }
+        let appended = newNodes.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        merged.append(contentsOf: appended)
+        return merged
+    }
+}
+
+private struct MouseTrackingView: NSViewRepresentable {
+    let onMove: () -> Void
+    let onHoverChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> TrackingView {
+        let view = TrackingView()
+        view.onMove = onMove
+        view.onHoverChange = onHoverChange
+        return view
+    }
+
+    func updateNSView(_ nsView: TrackingView, context: Context) {
+        nsView.onMove = onMove
+        nsView.onHoverChange = onHoverChange
+    }
+}
+
+private final class TrackingView: NSView {
+    var onMove: (() -> Void)?
+    var onHoverChange: ((Bool) -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let options: NSTrackingArea.Options = [
+            .activeInKeyWindow,
+            .mouseEnteredAndExited,
+            .mouseMoved,
+            .inVisibleRect
+        ]
+        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChange?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChange?(false)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onMove?()
     }
 }
 
@@ -271,6 +428,9 @@ struct FileListRow: View {
                 playTrashSound()
                 onDelete()
             }
+            Button("Open Enclosing Folder in Finder", systemImage: "folder") {
+                FileOperations.revealInFinder(node.path)
+            }
         }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.1)) {
@@ -330,8 +490,13 @@ struct FileListRow: View {
             return formatBytes(node.size)
         }
 
-        if case .scanning = node.scanStatus, node.size > 0 {
-            return "≈ \(formatBytes(node.size))"
+        if node.size > 0 {
+            switch node.scanStatus {
+            case .stale, .scanning:
+                return "\(formatBytes(node.size))..."
+            case .current, .error:
+                return formatBytes(node.size)
+            }
         }
 
         if node.lastScanned == nil {
@@ -462,6 +627,6 @@ struct FileIcon: View {
         FileNode(path: URL(fileURLWithPath: "/test/photo.jpg"), name: "photo.jpg", size: 50_000_000, isDirectory: false),
     ]
 
-    return FileListView(appState: state, nodes: nodes)
+    FileListView(appState: state, nodes: nodes)
         .frame(width: 400, height: 300)
 }
