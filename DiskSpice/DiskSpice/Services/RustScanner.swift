@@ -11,6 +11,9 @@ class RustScanner: Scanner {
     private var pendingEntries: [ScanEntry] = []
     private var flushTask: Task<Void, Never>?
     private let flushInterval: Duration = .milliseconds(80)
+    private var readTask: Task<Void, Never>?
+    private var currentSessionId: Int = 0
+    private var cancelledSessionId: Int?
 
     private var scannerPath: URL? {
         Bundle.main.url(forResource: "diskspice-scan", withExtension: nil, subdirectory: "Resources")
@@ -24,10 +27,15 @@ class RustScanner: Scanner {
             return
         }
 
+        currentSessionId &+= 1
+        let sessionId = currentSessionId
+        cancelledSessionId = nil
         isScanning = true
         pendingEntries.removeAll()
         flushTask?.cancel()
         flushTask = nil
+        readTask?.cancel()
+        readTask = nil
 
         let process = Process()
         process.executableURL = scannerURL
@@ -46,8 +54,8 @@ class RustScanner: Scanner {
 
         // Read output in background
         let outputHandle = stdoutPipe.fileHandleForReading
-        Task.detached { [weak self] in
-            await self?.readOutput(from: outputHandle, basePath: path)
+        readTask = Task.detached { [weak self] in
+            await self?.readOutput(from: outputHandle, basePath: path, sessionId: sessionId)
         }
 
         do {
@@ -63,20 +71,31 @@ class RustScanner: Scanner {
             delegate?.scanner(self, didFailAt: path, error: error)
         }
 
-        flushPendingEntries()
+        if let readTask {
+            _ = await readTask.value
+        }
+        let wasCancelled = cancelledSessionId == sessionId
+        if !wasCancelled {
+            flushPendingEntries()
+        }
         isScanning = false
-        delegate?.scannerDidComplete(self)
+        if !wasCancelled {
+            delegate?.scannerDidComplete(self)
+        }
     }
 
-    private func readOutput(from handle: FileHandle, basePath: URL) async {
+    private func readOutput(from handle: FileHandle, basePath: URL, sessionId: Int) async {
         var buffer = Data()
 
         while true {
+            if Task.isCancelled || sessionId != currentSessionId || cancelledSessionId == sessionId {
+                break
+            }
             let data = handle.availableData
             if data.isEmpty {
                 // Process any remaining data in buffer
                 if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8) {
-                    await processLine(line, basePath: basePath)
+                    await processLine(line, basePath: basePath, sessionId: sessionId)
                 }
                 break
             }
@@ -89,26 +108,28 @@ class RustScanner: Scanner {
                 buffer = buffer[(newlineIndex + 1)...]
 
                 if let line = String(data: lineData, encoding: .utf8) {
-                    await processLine(line, basePath: basePath)
+                    await processLine(line, basePath: basePath, sessionId: sessionId)
                 }
             }
         }
     }
 
-    private func processLine(_ line: String, basePath: URL) async {
+    private func processLine(_ line: String, basePath: URL, sessionId: Int) async {
+        guard sessionId == currentSessionId, cancelledSessionId != sessionId else { return }
         guard !line.isEmpty, let data = line.data(using: .utf8) else { return }
 
         do {
             let message = try JSONDecoder().decode(RustScanMessage.self, from: data)
             await MainActor.run {
-                self.handleMessage(message, basePath: basePath)
+                self.handleMessage(message, basePath: basePath, sessionId: sessionId)
             }
         } catch {
             // Ignore malformed lines
         }
     }
 
-    private func handleMessage(_ message: RustScanMessage, basePath: URL) {
+    private func handleMessage(_ message: RustScanMessage, basePath: URL, sessionId: Int) {
+        guard sessionId == currentSessionId, cancelledSessionId != sessionId else { return }
         switch message {
         case .entry(let entry):
             bufferEntry(entry)
@@ -144,6 +165,10 @@ class RustScanner: Scanner {
     func cancelScan() {
         sendCommand("cancel")
         process?.terminate()
+        cancelledSessionId = currentSessionId
+        readTask?.cancel()
+        flushTask?.cancel()
+        pendingEntries.removeAll()
         isScanning = false
     }
 

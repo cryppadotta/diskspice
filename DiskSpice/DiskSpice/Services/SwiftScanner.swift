@@ -127,6 +127,11 @@ class SwiftScanner {
             }
 
             for case let url as URL in enumerator {
+                if Task.isCancelled {
+                    let sorted = nodes.sorted { $0.size > $1.size }
+                    let nextOffset = effectiveOffset + processed
+                    return ScanDirectoryResult(nodes: sorted, isComplete: false, nextOffset: nextOffset)
+                }
                 entriesScanned += 1
                 if entriesScanned <= effectiveOffset {
                     continue
