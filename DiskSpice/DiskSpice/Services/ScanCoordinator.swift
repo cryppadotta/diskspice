@@ -136,6 +136,7 @@ class ScanCoordinator: ScannerDelegate {
             children[i].lastScanned = Date()
         }
         appState.updateChildren(at: path, children: children)
+        appState.scanQueue.markScanned(path: path)
     }
 
     private func handleError(at path: URL, error: Error) {

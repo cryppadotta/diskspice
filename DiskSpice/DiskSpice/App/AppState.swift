@@ -176,7 +176,7 @@ class AppState {
         // This will scan it immediately if not already scanned,
         // and queue its children for scanning next
         Task { @MainActor in
-            scanQueue.prioritize(path: path, force: true)
+            scanQueue.prioritize(path: path, force: false)
             requestFocusedScan(for: path)
         }
     }
@@ -188,7 +188,7 @@ class AppState {
         }
         let path = navigationState.currentPath
         Task { @MainActor in
-            scanQueue.prioritize(path: path, force: true)
+            scanQueue.prioritize(path: path, force: false)
             requestFocusedScan(for: path)
         }
     }
@@ -200,7 +200,7 @@ class AppState {
         }
         let path = navigationState.currentPath
         Task { @MainActor in
-            scanQueue.prioritize(path: path, force: true)
+            scanQueue.prioritize(path: path, force: false)
             requestFocusedScan(for: path)
         }
     }
@@ -372,6 +372,7 @@ private extension AppState {
 
     func requestFocusedScan(for path: URL) {
         guard coordinator != nil else { return }
+        guard !isDirectoryComplete(path) else { return }
         focusedScanTask?.cancel()
         focusedScanTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -585,11 +586,25 @@ private extension AppState {
         self.selectedNode = updatedNode
     }
 
+    func isDirectoryComplete(_ path: URL) -> Bool {
+        if let children = fileTree[path] {
+            return !children.contains { child in
+                switch child.scanStatus {
+                case .scanning, .stale:
+                    return true
+                case .current, .error:
+                    return false
+                }
+            }
+        }
+        return !scanQueue.needsScan(path: path)
+    }
+
     func pathHasPrefix(_ path: URL, prefix: URL) -> Bool {
         let pathComponents = path.standardizedFileURL.pathComponents
         let prefixComponents = prefix.standardizedFileURL.pathComponents
         guard prefixComponents.count <= pathComponents.count else { return false }
-        return pathComponents.prefix(prefixComponents.count) == prefixComponents
+        return Array(pathComponents.prefix(prefixComponents.count)) == prefixComponents
     }
 }
 

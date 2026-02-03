@@ -69,6 +69,13 @@ class ScanQueue {
         if force {
             knownScannedPaths = knownScannedPaths.filter { !pathHasPrefix($0, prefix: path) }
         }
+        if !force, knownScannedPaths.contains(path) {
+            Task {
+                await worker.markScanned(path: path)
+                await worker.prioritize(path: path, force: force)
+            }
+            return
+        }
         Task { await worker.prioritize(path: path, force: force) }
     }
 
@@ -133,7 +140,7 @@ class ScanQueue {
         let pathComponents = path.standardizedFileURL.pathComponents
         let prefixComponents = prefix.standardizedFileURL.pathComponents
         guard prefixComponents.count <= pathComponents.count else { return false }
-        return pathComponents.prefix(prefixComponents.count) == prefixComponents
+        return Array(pathComponents.prefix(prefixComponents.count)) == prefixComponents
     }
 }
 
@@ -228,9 +235,17 @@ actor ScanQueueWorker {
     func prioritize(path: URL, force: Bool) {
         debugLog("ScanQueue: prioritizing \(path.path)", category: "QUEUE")
 
+        cancelInFlightTasks()
+
         if scannedPaths.contains(path) && !force {
             focusRoot = path
-            queueChildrenIfNeeded(of: path, priority: .high)
+            completedExclusiveFocus = false
+            if exclusiveFocusMode {
+                tasks = tasks.filter { pathHasPrefix($0.path, prefix: path) }
+                deferredTasks = deferredTasks.filter { pathHasPrefix($0.path, prefix: path) }
+            }
+            updateQueueCount()
+            startScanning()
             return
         }
 
@@ -308,6 +323,9 @@ actor ScanQueueWorker {
             }
 
             if inFlight.isEmpty && tasks.isEmpty {
+                if advanceFocusIfIdle() {
+                    continue
+                }
                 if completedExclusiveFocus {
                     await sendLoopEnded(true)
                     scanTask = nil
@@ -357,7 +375,8 @@ actor ScanQueueWorker {
         scanner.setProgressCallback { _, filesScanned, bytesScanned in
             Task { [weak self] in
                 guard let self else { return }
-                guard generation == await self.currentGeneration() else { return }
+                let currentGen = await self.currentGeneration()
+                guard generation == currentGen else { return }
                 await self.updateDirectoryProgressThrottled(
                     path: task.path,
                     filesScanned: filesScanned,
@@ -454,6 +473,9 @@ actor ScanQueueWorker {
             }
             if exclusiveFocusMode {
                 tasks.removeAll()
+                if advanceFocusIfIdle() {
+                    return popNextTask()
+                }
                 self.focusRoot = nil
                 completedExclusiveFocus = true
                 return nil
@@ -522,6 +544,41 @@ actor ScanQueueWorker {
         debugLog("ScanQueue: path already scanned, checking children", category: "QUEUE")
     }
 
+    private func cancelInFlightTasks() {
+        scanGeneration &+= 1
+        for (_, task) in scanTasks {
+            task.cancel()
+        }
+        scanTasks.removeAll()
+        inFlight.removeAll()
+    }
+
+    private func advanceFocusIfIdle() -> Bool {
+        guard exclusiveFocusMode, var focus = focusRoot else { return false }
+
+        while true {
+            if !scannedPaths.contains(focus) {
+                focusRoot = focus
+                completedExclusiveFocus = false
+                if !containsTask(path: focus) {
+                    let task = ScanTask(path: focus, priority: .high, depth: pathDepth(focus))
+                    tasks.insert(task, at: 0)
+                    updateQueueCount()
+                }
+                return true
+            }
+
+            let parent = focus.deletingLastPathComponent()
+            if parent == focus {
+                focusRoot = nil
+                completedExclusiveFocus = true
+                return false
+            }
+
+            focus = parent
+        }
+    }
+
     private func pathDepth(_ path: URL) -> Int {
         path.pathComponents.count
     }
@@ -577,6 +634,6 @@ actor ScanQueueWorker {
         let pathComponents = path.standardizedFileURL.pathComponents
         let prefixComponents = prefix.standardizedFileURL.pathComponents
         guard prefixComponents.count <= pathComponents.count else { return false }
-        return pathComponents.prefix(prefixComponents.count) == prefixComponents
+        return Array(pathComponents.prefix(prefixComponents.count)) == prefixComponents
     }
 }
