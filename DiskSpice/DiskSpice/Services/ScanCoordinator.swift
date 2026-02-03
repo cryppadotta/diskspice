@@ -20,6 +20,7 @@ class ScanCoordinator: ScannerDelegate {
     // MARK: - Public Interface
 
     func startScan(at path: URL) async {
+        resetPendingUpdates()
         appState.isScanning = true
         appState.clearTree()
         await scanner.startScan(at: path)
@@ -32,6 +33,7 @@ class ScanCoordinator: ScannerDelegate {
             }
             scanner.cancelScan()
         }
+        resetPendingUpdates()
         focusedScanPath = path
         appState.isScanning = true
         await scanner.startScan(at: path)
@@ -43,6 +45,7 @@ class ScanCoordinator: ScannerDelegate {
 
     func cancelScan() {
         scanner.cancelScan()
+        resetPendingUpdates()
         appState.isScanning = false
     }
 
@@ -150,6 +153,12 @@ class ScanCoordinator: ScannerDelegate {
         flushPendingUpdates()
         appState.isScanning = false
         focusedScanPath = nil
+    }
+
+    private func resetPendingUpdates() {
+        updateDebounceTask?.cancel()
+        updateDebounceTask = nil
+        pendingUpdates.removeAll()
     }
 }
 

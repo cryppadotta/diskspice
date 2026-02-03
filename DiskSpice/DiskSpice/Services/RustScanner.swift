@@ -52,14 +52,16 @@ class RustScanner: Scanner {
         self.stdinPipe = stdinPipe
         self.stdoutPipe = stdoutPipe
 
-        // Read output in background
-        let outputHandle = stdoutPipe.fileHandleForReading
-        readTask = Task.detached { [weak self] in
-            await self?.readOutput(from: outputHandle, basePath: path, sessionId: sessionId)
-        }
-
+        var didLaunch = false
         do {
             try process.run()
+            didLaunch = true
+
+            // Read output in background
+            let outputHandle = stdoutPipe.fileHandleForReading
+            readTask = Task.detached { [weak self] in
+                await self?.readOutput(from: outputHandle, basePath: path, sessionId: sessionId)
+            }
 
             // Wait for process in background
             await withCheckedContinuation { continuation in
@@ -68,18 +70,22 @@ class RustScanner: Scanner {
                 }
             }
         } catch {
+            cancelledSessionId = sessionId
+            readTask?.cancel()
+            stdoutPipe.fileHandleForReading.closeFile()
+            stdinPipe.fileHandleForWriting.closeFile()
             delegate?.scanner(self, didFailAt: path, error: error)
         }
 
-        if let readTask {
+        if didLaunch, let readTask {
             _ = await readTask.value
         }
         let wasCancelled = cancelledSessionId == sessionId
-        if !wasCancelled {
+        if didLaunch && !wasCancelled {
             flushPendingEntries()
         }
         isScanning = false
-        if !wasCancelled {
+        if didLaunch && !wasCancelled {
             delegate?.scannerDidComplete(self)
         }
     }

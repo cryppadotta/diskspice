@@ -120,7 +120,7 @@ class AppState {
 
     var currentVolume: VolumeInfo? {
         volumes.first { vol in
-            navigationState.currentPath.path.hasPrefix(vol.path.path)
+            pathHasPrefix(navigationState.currentPath, prefix: vol.path)
         }
     }
 
@@ -350,6 +350,9 @@ class AppState {
     func clearTree() {
         fileTree.removeAll()
         sortedCache = nil
+        coalesceTask?.cancel()
+        coalesceTask = nil
+        pendingDirectoryUpdates.removeAll()
     }
 }
 
@@ -450,7 +453,7 @@ private extension AppState {
 
     func saveCache(for volume: VolumeInfo) async {
         let volumePath = volume.path.path
-        let treeForVolume = fileTree.filter { $0.key.path.hasPrefix(volumePath) }
+        let treeForVolume = fileTree.filter { pathHasPrefix($0.key, prefix: volume.path) }
         do {
             try await CacheManager.shared.saveTree(treeForVolume, for: volume)
         } catch {
@@ -459,7 +462,7 @@ private extension AppState {
     }
 
     func volumeForPath(_ path: URL) -> VolumeInfo? {
-        volumes.first { path.path.hasPrefix($0.path.path) }
+        volumes.first { pathHasPrefix(path, prefix: $0.path) }
     }
 
     func updateParentNode(for path: URL, children: [FileNode], isComplete: Bool = true) {
@@ -580,6 +583,13 @@ private extension AppState {
         guard let selectedNode else { return }
         guard let updatedNode = fileTree[path]?.first(where: { $0.path == selectedNode.path }) else { return }
         self.selectedNode = updatedNode
+    }
+
+    func pathHasPrefix(_ path: URL, prefix: URL) -> Bool {
+        let pathComponents = path.standardizedFileURL.pathComponents
+        let prefixComponents = prefix.standardizedFileURL.pathComponents
+        guard prefixComponents.count <= pathComponents.count else { return false }
+        return pathComponents.prefix(prefixComponents.count) == prefixComponents
     }
 }
 

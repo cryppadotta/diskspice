@@ -188,6 +188,10 @@ actor ScanQueueWorker {
 
     func startScanning() {
         guard scanTask == nil else { return }
+        totalFilesScanned = 0
+        totalBytesScanned = 0
+        scanStartTime = Date()
+        lastProgressUpdate = .distantPast
         didSendLoopEnded = false
         scanTask = Task { [weak self] in
             await self?.scanLoop()
@@ -214,6 +218,10 @@ actor ScanQueueWorker {
         partialResults.removeAll()
         partialOffsets.removeAll()
         inFlight.removeAll()
+        totalFilesScanned = 0
+        totalBytesScanned = 0
+        lastProgressUpdate = .distantPast
+        scanStartTime = nil
         Task { await sendUpdate(.queuedCount(0)) }
     }
 
@@ -229,6 +237,7 @@ actor ScanQueueWorker {
         if force {
             scannedPaths = scannedPaths.filter { !pathHasPrefix($0, prefix: path) }
             partialResults = partialResults.filter { !pathHasPrefix($0.key, prefix: path) }
+            partialOffsets = partialOffsets.filter { !pathHasPrefix($0.key, prefix: path) }
         }
 
         focusRoot = path
@@ -277,6 +286,7 @@ actor ScanQueueWorker {
     func markScanned(path: URL) {
         scannedPaths.insert(path)
         partialResults.removeValue(forKey: path)
+        partialOffsets.removeValue(forKey: path)
         tasks.removeAll { $0.path == path }
         deferredTasks.removeAll { $0.path == path }
         updateQueueCount()
@@ -286,10 +296,6 @@ actor ScanQueueWorker {
 
     private func scanLoop() async {
         debugLog("ScanQueue: starting scan loop", category: "QUEUE")
-        if scanStartTime == nil {
-            scanStartTime = Date()
-        }
-
         while !Task.isCancelled {
             drainDeferredTasksIfNeeded()
             while inFlight.count < maxConcurrentScans {
